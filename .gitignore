@@ -24,6 +24,13 @@ service-account*.json
 *.sln
 *.sw?
 
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Local agent/CLI config
 .claude/
 
