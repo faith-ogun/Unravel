@@ -8,10 +8,12 @@ on Vertex AI.
 
 from google.adk.agents import LlmAgent
 
-# Gemini 3 is not yet available in this project (404), so we pin to the current
-# GA model. Swap to "gemini-3-flash" once it is enabled, or use the auto-tracking
-# alias "gemini-flash-latest" (global location only).
-MODEL_FLASH = "gemini-2.5-flash"
+# Gemini 3.1 models available in this project (verified 3 Jun 2026, location global):
+#   gemini-3.1-flash-lite   -> fast delta/Watcher reasoning
+#   gemini-3.1-pro-preview  -> Adjudicator + Cascade synthesis (the moat)
+# Note: GA gemini-3.1-pro and full gemini-3.1-flash are not yet enabled here.
+MODEL_FLASH = "gemini-3.1-flash-lite"
+MODEL_PRO = "gemini-3.1-pro-preview"
 
 root_agent = LlmAgent(
     name="unravel_watcher",
