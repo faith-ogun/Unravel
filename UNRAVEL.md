@@ -1,152 +1,196 @@
-# Unravel, Project Definition (A → Z)
+# Unravel, Project Definition (A to Z)
 
-**Tagline:** *Closing the one diagnostic loop in medicine that stays open for years.*
+**Tagline:** *The variant commons is passive. Unravel makes it active.*
 
-Unravel is a genomics-native guardian agent that continuously re-reads the world's evolving variant evidence against a clinic's historical genetic reports, and the moment a **variant of uncertain significance (VUS)** becomes clinically actionable, it drafts the reclassification alert **and** the cascade-testing fan-out for the at-risk family, for a clinician to review and send.
+The global variant knowledge commons (ClinVar, ClinGen, OncoKB, CIViC) accumulates evidence and waits for a human to come check it. Unravel is the missing **active layer**: a genomics agent that pulls evidence to **resolve** a clinic's uncertain variants, **activates** the at-risk family the moment one becomes dangerous, and **pushes new evidence back** to the commons so the next patient resolves faster. It never sends; it drafts for a clinician.
 
 - **Hackathon:** Google Cloud Rapid Agent Hackathon (deadline 11 June 2026)
 - **Track:** **Fivetran**
 - **Builder:** Faith Ogundimu, cancer geneticist / PhD cancer genomics
-- **Status:** scoped, pre-build (fresh repo to be created within the contest window)
+- **Models:** Gemini 3.1 (Flash-Lite + Pro) on Vertex AI, code-first ADK to Cloud Run
 
 ---
 
 ## A. The Problem
 
-A germline or tumor genetic panel often returns a **VUS**, a variant the lab cannot yet call benign or pathogenic. Clinically, "uncertain" means *do nothing.* But the evidence does not stand still: as data accrues in **ClinVar, ClinGen, OncoKB, and CIViC**, a meaningful fraction of these variants get **reclassified**, and the clinically catastrophic minority flip **VUS → likely pathogenic / pathogenic**, changing surveillance, prophylactic options, and family (cascade) testing.
+A germline or tumour panel often returns a **variant of uncertain significance (VUS)**, a change the lab cannot yet call benign or pathogenic. Clinically, "uncertain" means *do nothing*. But the evidence does not stand still: as data accrues in ClinVar, ClinGen, OncoKB, and CIViC, a meaningful fraction of VUS get **reclassified**, and the clinically catastrophic minority flip **VUS to likely pathogenic / pathogenic**, changing surveillance, prophylaxis, and family (cascade) testing.
 
-In reality, **no system re-contacts the patient or their at-risk relatives** when this happens. The report sits in a PDF in an EHR; the ordering clinician has moved on; the lab has no obligation to re-issue. The **duty to recontact** is openly debated in the genetics literature and described by ACMG as "desirable but not currently feasible." That gap is the entire reason Unravel exists.
+Two failures compound:
 
-This is the **"diagnostic loop that never closes"**, the archetype that has repeatedly won healthcare-agent hackathons, but rendered **genomics-native and temporally extreme**: the loop stays open for *years*.
+1. **Nobody watches.** When a variant flips, no system re-contacts the patient or their at-risk relatives. The report sits in a PDF; the ordering clinician has moved on; the lab has no obligation to re-issue. The **duty to recontact** is described by ACMG as "desirable but not currently feasible." Median time to reclassification is around **7 years** (BMJ, Goh 2024).
 
-**Who benefits, given the years-long delay (the cascade-first reframe).** Reclassification typically takes **18–24 months, 5+ years for rare genes**, long enough that the original patient may be in remission or deceased. That is not a flaw in the idea; it is the reason it matters. A germline variant that flips is a **family** event: the life saved is often a **relative's**, not the proband's. In a 2024 survey, **24% of genetic counsellors had received a reclassified VUS for a patient who had already died, with no guideline for what to do next.** Unravel is therefore **cascade-first**: the beneficiary is the living at-risk family.
+2. **Nobody resolves.** Long before a flip, a clinician has no system telling them *which* of their hundreds of VUS are close to actionable, *what specific evidence* would resolve each one, or *who in the family* could provide it. A VUS spans roughly a **10% to 90%** probability of pathogenicity, and that range is invisible at the point of care.
 
-**Not only cancer (disease-agnostic).** The same loop fails in **rare and paediatric disease**, where patients are often children with decades ahead, reclassification can **end a diagnostic odyssey** and **change reproductive decisions**. Unravel's engine is disease-agnostic; the hero demo is hereditary cancer (Lynch), but the impact spans germline hereditary disease.
+**The cascade-first reframe.** Because reclassification takes years, the original patient may be in remission or deceased by the time a VUS flips. That is not a flaw in the idea; it is the reason it matters. A germline variant that flips is a **family** event: the life saved is often a **relative's**. In a 2024 survey, **24% of genetic counsellors had received a reclassified VUS for a patient who had already died, with no guideline for what to do next**. Unravel is cascade-first: the beneficiary is the living at-risk family.
+
+**Disease-agnostic.** The same loop fails in rare and paediatric disease, where reclassification can end a diagnostic odyssey and change reproductive decisions. The hero demo is hereditary cancer (Lynch); the engine spans germline hereditary disease.
 
 ---
 
 ## B. The Named Victim (the opening story)
 
-> In 2019, **Diane, 44**, had surgery for **colorectal cancer**. Her germline panel returned a **VUS in *MLH1***, a Lynch syndrome gene. "Uncertain" → nothing was done. Her oncologist said, "If it ever changes, we'll let you know." It changed: in **2023 a ClinGen expert panel reclassified that exact variant to likely pathogenic.** The update went public. It never reached Diane. No system was watching. Her **22-year-old daughter**, who could have started colonoscopies at 20 and been offered predictive testing the day the variant flipped, later presented with a tumor that Lynch surveillance is designed to catch early. The variant was reclassified. The loop never closed.
+> In 2019, **Diane, 44**, had surgery for **colorectal cancer**. Her germline panel returned a **VUS in *MLH1***, a Lynch syndrome gene. "Uncertain" meant nothing was done. Her oncologist said, "if it ever changes, we'll let you know." It changed: in **2023 a ClinGen expert panel reclassified that exact variant to likely pathogenic.** The update went public. It never reached Diane. No system was watching. Her **22-year-old daughter**, who could have started colonoscopies at 20 and been offered predictive testing the day the variant flipped, later presented with a tumour that Lynch surveillance is built to catch early. The variant was reclassified. The loop never closed.
 
 ---
 
-## C. The Core Idea (one sentence)
+## C. The Core Idea
 
-A guardian agent that watches evolving variant evidence against a clinic's historical VUS registry, and on a confirmed **actionable** reclassification, drafts the clinician alert and the at-risk-relative cascade fan-out, **draft-only, never autonomous.**
+Unravel runs one loop, end to end, over the clinic's historical VUS registry:
 
----
+**watch evidence -> build the evidence ledger and posterior -> triage which VUS are hot -> plan the evidence that would resolve them -> adjudicate confirmed flips -> activate the at-risk family -> give the new evidence back to the commons.**
 
-## D. The Agentic Moat (why this is not a cron job)
-
-Detecting a status flip is deterministic. **Adjudicating it is not.** ClinVar carries *conflicting* submissions at different review/star levels; ClinGen expert panels disagree with single-submitter assertions; ontologies mismatch. Deciding whether a VUS has **actually** crossed the actionability threshold, and correctly **withholding** a flip when it is only a low-confidence single submission, is genuine LLM reasoning over contradictory, unstructured, citation-backed evidence. The demo centerpiece is a **hard case** where naive rules misfire and the agent holds.
+Every clinical output is a **draft** for a qualified clinician. The agent draws the line at notification, not action.
 
 ---
 
-## E. The Three Agents (distinct data, distinct clocks)
+## D. The Reframe (passive commons to active layer)
 
-| Agent | Data | Clock | Job |
-|---|---|---|---|
-| **1. The Watcher** (Evidence Surveillance) | Continuously-synced evidence feeds (ClinVar / ClinGen / OncoKB / CIViC) | The *evidence's* clock, wakes on a change to any watched variant | Deterministic, auditable delta-detection against the clinic's historical VUS registry. **Fivetran is this agent's heartbeat.** |
-| **2. The Adjudicator** (Clinical Significance) | Conflicting submissions, free-text criteria, original report, gene actionability tier, penetrance | Fires when the Watcher flags a change | Decide whether the reclassification *changes management*: weight by review status, resolve conflicts, apply ACMG / gene-tier logic, classify urgency. **The AI-factor moment.** |
-| **3. The Cascade Coordinator** (Recontact & Fan-out) | Pedigree / family structure + responsible care team | Fires only on a confirmed actionable upgrade | Draft the clinician-facing alert (with full evidence provenance) **and** the cascade-testing fan-out to at-risk relatives. Draft-only. **The genomics-native "wow."** |
+This is the whole idea in one move. Today's tools are passive:
 
----
+- **VUSVista** monitors updates and notifies (watch).
+- **iVar** identifies which patients carry a variant (lookup).
+- **AlphaMissense / ClinGen** score individual variants (annotation).
 
-## F. Clinical Guardrails (intellectual honesty)
-
-- **Asymmetric by design:** surface VUS→P/LP upgrades in actionable genes loudly; handle the (more common) downgrades as quiet de-escalation notes. False-positive management > raw sensitivity.
-- **Provenance is first-class:** never treat a 1-star single submission as equal to a ClinGen expert-panel call. Review status / star ratings are visible in the reasoning.
-- **Actionability-grounded urgency:** ACMG SF list, NCCN-managed genes; *BRCA1/2* and Lynch genes (*MLH1/MSH2/MSH6/PMS2*) are highest tier.
-- **Safety posture:** **draft-only, clinician-facing, never patient-facing, never autonomous.** The agent draws the line at notification, not action.
-- **No real patient data**, synthetic patients only.
+Each owns one link and waits for a human. **What has never been built is the active integration:** one autonomous agent that triages hot VUS, *computes the evidence that would resolve them*, activates the at-risk family on a real flip, routes the deceased-proband case to ethics, and *contributes new evidence back* to ClinVar, all on a live evidence feed. Unravel claims the integration, not the parts.
 
 ---
 
-## G. Technical Architecture (Fivetran track)
+## E. The Five Agents (genuinely multi-shape: distinct data, distinct clocks)
 
-- **Path:** code-first **ADK (Agent Development Kit) → Cloud Run.**
-- **Models:** `gemini-3.1-flash-lite` for high-frequency delta classification across many variants; `gemini-3.1-pro-preview` for adjudication and the recontact-draft synthesis (two-tier routing). *(Verified available in project `unravel-ra` at location `global`, 3 Jun 2026; GA `gemini-3.1-pro` and full `gemini-3.1-flash` not yet enabled there.)*
-- **Fivetran seam (load-bearing):** Fivetran syncs the evidence feeds into a destination; the ADK agent calls the **Fivetran MCP server** to (1) check freshness before any evaluation, (2) trigger an on-demand sync, (3) read sync history to find which feeds changed. The agent manages **multiple** evolving feeds, connector sprawl + freshness + agentic tool-use, not a single `curl`.
-- **Agent tools:**
-  - `fivetran.get_sync_status` · `fivetran.trigger_sync` · `fivetran.get_schema` (via MCP)
-  - `detect_reclassifications(since)`, deterministic diff (the auditable core)
-  - `match_affected_patients(variant)`, find cases + flagged relatives
-  - `draft_recontact(case)`, Gemini, draft-only
-  - `score_variant_alphamissense(variant)`, **optional power-up:** pull AlphaMissense computational evidence (PP3/BP4) as an adjudication input. The only AI tool with peer-reviewed VUS→LP reclassification traction, and a DeepMind/Google tie-in no competitor has. Cut if Day-7 time is tight.
-  - `assess_compound_risk`, optional
-- **Stores:** Fivetran-managed destination (evidence, in BigQuery) + a **FHIR R4 patient/VUS registry** seeded with variants engineered to sit across a real reclassification boundary.
-- **Clinical seam, FHIR R4 (like Tracer, but inverted).** Tracer fires when the EHR *pushes* a new result; Unravel fires when external *evidence* changes, then reads the FHIR registry and **writes drafts back**. Model the registry as `Patient`, the variant as an `Observation` (HL7 **Genomics Reporting IG** variant profile), and the pedigree as `FamilyMemberHistory` / `RelatedPerson`. On a confirmed upgrade, write **draft** resources: `Task` (recontact/cascade, `intent: proposal`, `status: draft`), `Communication`/`DocumentReference` (the letter), `RiskAssessment` (per relative). Same webhook pattern as Tracer, no EHR modification; works with Epic/Cerner/Athena. Make it *visible* in the UI via a "View as FHIR" reveal on each draft.
-- **Frontend:** React / Vite on Firebase Hosting.
-- **Secrets:** Secret Manager for partner API keys.
+| Agent | Model | Clock | Data | Job |
+|---|---|---|---|---|
+| **1. Watcher** (surveillance) | 3.1 Flash-Lite | the evidence's clock, wakes on a Fivetran-detected change | synced evidence feeds | Change detection vs the VUS registry; triage which changes matter. **Fivetran is its heartbeat.** |
+| **2. Adjudicator** (Bayesian evidence synthesis) | 3.1 Pro | fires on a flagged change | multi-source ACMG evidence (ClinVar + stars, gnomAD, AlphaMissense, splicing, segregation, structure, literature) | Build the evidence ledger, compute a calibrated **posterior probability of pathogenicity**, classify cold/warm/hot/actionable, **withhold** weak flips. **The moat.** |
+| **3. Resolution Planner** (next-best-evidence) | 3.1 Pro | proactive, for any hot or warm VUS | the ledger + what evidence is obtainable | Compute the **information value** of each candidate next experiment and recommend the single highest-yield move, in ACMG currency. **The never-done core.** |
+| **4. Cascade Coordinator** (family activation) | 3.1 Pro | only on a confirmed actionable upgrade | pedigree (FHIR FamilyMemberHistory / RelatedPerson) + care team | Identify at-risk relatives; draft the clinician alert + cascade fan-out as draft FHIR resources. **The genomics-native wow.** |
+| **5. Steward** (ethics + commons) | 3.1 Pro | on edge cases and on resolution | patient status, consent, resolved evidence | Route deceased-proband cases to **ethics/legal review** (no guidelines exist); draft the **ClinVar submission back** when Unravel-orchestrated evidence resolves a VUS. **The systemic novelty.** |
 
 ---
 
-## H. Data Sources
+## F. Signature capabilities (the "wow")
 
-- **Evidence (real):** ClinVar (with dated assertion history), ClinGen, OncoKB, CIViC.
-- **Patients (synthetic):** Synthea-generated cohort (~20 patients) + a hand-crafted demo set with at least one variant that genuinely crossed a reclassification boundary on a known date.
-- **Public, no real PHI.**
-
----
-
-## I. The Demo (no-login sandbox, <2 min)
-
-A judge lands on a dashboard of synthetic patients with VUS results and clicks **"Run evidence watch."** A visible **Fivetran freshness check** runs; a variant (e.g., the *MLH1* case) **flips VUS → Likely Pathogenic** in the latest sync; the affected patient **and a relative** light up on an "affected" board with a one-line rationale; a **draft recontact letter** renders, stamped *DRAFT, clinician review required, not sent.*
-
-**The "wow" = a time machine:** a rewind-to-2019 / fast-forward-to-today toggle over a *genuine* historical ClinVar reclassification, so the judge watches the external evidence change and the agent catch it.
+1. **The Live Bayesian VUS Meter.** A calibrated posterior probability of pathogenicity, rendered as a gauge that moves as evidence flows in through Fivetran, with the full evidence ledger behind it and exactly what is missing to cross the actionable line.
+2. **The 3D Structural Story.** A confusing one-line text VUS blooms into a 3D **AlphaFold** protein structure with the variant residue highlighted, an **AlphaMissense** pathogenicity heatmap across the domain, and the known-pathogenic neighbours clustered around it. The science made visible, and pure DeepMind/Google.
+3. **The Next-Best-Evidence Plan.** "Posterior 0.62 (VUS). Segregation in the affected sister yields PP1; with the existing AlphaMissense PP3 that crosses the LP threshold (to 0.91). Recommended next step: sister segregation. Do not initiate cascade testing until LP/P."
+4. **The Cohort Counterfactual.** Not one Diane: the whole silent cohort sitting in the gap right now, with median days of delay and at-risk relatives never offered testing, derived from real ClinVar reclassification dates.
+5. **The Give-Back Flywheel.** When orchestrated evidence resolves a VUS, Unravel drafts the ClinVar submission back to the commons. It does not just consume the commons; it improves it.
 
 ---
 
-## J. Evaluation (credibility)
+## G. The Science Layer (how grounding works)
 
-- **ClinVar time-replay backtest:** replay dated assertion history and measure precision/recall on variants that genuinely got reclassified, real-data validation, not hand-crafted examples.
-- **pytest suite** across all agent tools (happy-path + edge + abstention/withhold cases) for an honest "N-patient eval / 100+ tests" claim.
-- One **cited impact number**: per-patient cascade-testing value + a delayed-surveillance mortality figure from published literature.
+The Adjudicator does **grounded agentic reasoning**, not rule-firing. It assembles an **ACMG/AMP evidence ledger** and computes a posterior using the published **point-based Bayesian** framework (Tavtigian 2018; ClinGen calibration), so the output is a calibrated probability, not a vibe.
 
----
+Evidence streams and their ACMG codes:
 
-## K. Differentiation
+| Stream | Source | ACMG code(s) |
+|---|---|---|
+| Clinical assertions + review stars | ClinVar / ClinGen | the clinical anchor |
+| Population frequency | gnomAD | PM2 / BS1 / BA1 |
+| Computational (missense) | **AlphaMissense** (ClinGen-calibrated) | PP3 / BP4 |
+| Splicing | SpliceAI | PP3 / BP4 (splice) |
+| Structural context | **AlphaFold** neighbour analysis | supporting |
+| Segregation | pedigree | PP1 |
+| De novo | trio | PS2 / PM6 |
+| Functional | literature | PS3 / BS3 |
 
-- Genomics-native version of the proven loop-closure winning archetype.
-- The **cascade-ignition** (family fan-out) is something no existing system or competing entry does.
-- **Domain authority:** authored by a cancer geneticist, a credibility moat in the Fivetran bucket.
-- Partner integration is **structural**, not decorative: the evolving-evidence sync *is* the mechanism of the loop being closed.
-
-**Prior art (acknowledge openly, intellectual honesty is a winning pattern):** two real tools each own *one* link of the chain. **iVar** (lab database) answers *"who carries this variant?"*; **VUSVista** (curation aid) answers *"did the evidence change?"* **Neither closes the loop to the patient and family, and neither is an autonomous agent.**
-
-**Positioning line:** *iVar tells a lab **who** carries a variant. VUSVista tells a curator **when** the evidence moved. Unravel is the autonomous agent that does both, then closes the loop the others leave open: it reasons about whether the change is real, finds the patient **and the at-risk family**, and drafts the recontact no one else is built to send.*
-
-> Full competitor breakdown + "what to hone in on" → `metadata/differentiation-analysis.md`.
+Every verdict **cites the evidence behind it** ("defensible by design"). AlphaMissense and structural context are **supporting computational evidence, never the classifier**; ACMG classification stays with experts.
 
 ---
 
-## L. Scope Discipline
+## H. The Agentic Moat (why this is not a cron job)
 
-Build **one loop only.** Explicitly **out of scope:** intake, eligibility, pathology readiness, prior authorization, NGS report parsing, genetics referral logistics (the old 7-stage chain). One agent loop, one MCP partner, one killer demo scenario.
+Detecting a status change is plumbing. The hard parts are AI:
 
----
+- **Synthesising discordant, multi-source evidence** into a calibrated posterior, then **withholding** when a single 1-star submission is not enough (the credibility beat, a naive rules engine fires a false alarm here).
+- **Computing the next experiment that resolves the uncertainty**, decision-theoretic reasoning in ACMG currency that encodes a geneticist's judgment.
+- **Reading the structural and family context** to explain *why* a variant matters.
 
-## M. Compliance Notes (build hygiene)
-
-- **New code only.** This is a **ground-up reimplementation** of the concept on Google Cloud ADK. The earlier prototype (the May "ThreadBio" build, for a different hackathon) is **not reused, not reopened, not imported.** Fresh repo, fresh git history dated within the contest window.
-- **Permitted build tooling:** **Google Antigravity + Gemini Code Assist** for all shipped source; Fivetran's built-in AI features. No non-Google AI assistants in the dev workflow. No non-Google co-author trailers in commits.
-- **Permitted Google services:** Gemini models (Vertex AI / Gemini API), Agent Builder / Agent Platform Studio or ADK, Agent Runtime, Cloud Run, Vertex AI (vector search / grounding / data stores), BigQuery / BigQuery ML, Cloud Storage, Secret Manager, Firebase Hosting.
-- **Repo:** public, OSI-approved license visible in the About section.
-- **Track fallback:** if the Fivetran connector does not round-trip by end of Day 2, pivot to **Arize** (same ADK→Cloud Run skeleton; observability/eval of the Adjudicator instead of sync). Keep the agent core feed-agnostic so the pivot costs hours.
+The withhold and the resolution plan are **AI judgments proven reliable by the backtest**, not hard-coded rules. Determinism is confined to plumbing (the data diff) and the draft-only safety gate.
 
 ---
 
-## N. The Build Gate (Day 1–2, before anything else)
+## I. Clinical guardrails (intellectual honesty is a winning pattern)
 
-Prove **one** evidence feed round-trips through Fivetran and that `get_sync_status` + `trigger_sync` are callable from its MCP server. The moment that round-trips, the architecture is real. If it does not by end of Day 2 → switch to the Arize fallback.
+- **Draft-only, clinician-facing, never patient-facing, never autonomous.**
+- **Withholds on cold/warm VUS; never pushes family testing on an uncertain variant.** Acting on a VUS risks a cascade of unnecessary tests, anxiety, and overdiagnosis.
+- **The deceased-proband path routes to ethics/legal review, not a letter.** There are no guidelines for disclosing a reclassified VUS of a dead patient to relatives.
+- **Asymmetric:** actionable upgrades surfaced loudly; the more common benign downgrades handled as quiet de-escalation.
+- **AlphaMissense / structure are supporting evidence, not the authority.**
+- **Synthetic patients only. No real PHI.**
+
+---
+
+## J. Technical Architecture (Fivetran track)
+
+- **Path:** code-first ADK to Cloud Run. **Models:** `gemini-3.1-flash-lite` (Watcher / delta) + `gemini-3.1-pro-preview` (Adjudicator, Resolution Planner, Cascade, Steward). *(Verified in project `unravel-ra`, location `global`, 3 Jun 2026.)*
+- **Fivetran seam (load-bearing):** Fivetran syncs the evidence feeds into BigQuery; the agent calls the **Fivetran MCP server** inside its loop to check freshness, trigger targeted re-syncs, and read sync history as the change signal. Multiple evolving feeds, agentic tool-use, not a single call.
+- **Tools (task-shaped):**
+  - `fivetran.get_sync_status` / `trigger_sync` / `get_schema` (MCP)
+  - `detect_reclassifications(since)` (the data diff)
+  - `build_evidence_ledger(variant)` (assemble ClinVar / gnomAD / AlphaMissense / literature into an ACMG ledger)
+  - `score_posterior(ledger)` (Bayesian point computation)
+  - `structural_context(variant)` (AlphaFold + AlphaMissense neighbour analysis)
+  - `plan_next_evidence(variant, ledger, pedigree)` (information-value ranking)
+  - `match_affected_patients(variant)`
+  - `draft_recontact(case)` (draft-only)
+  - `draft_clinvar_submission(variant, resolved_evidence)` (the give-back, draft-only)
+- **Stores:** BigQuery (evidence warehouse) + a **FHIR R4** patient/VUS registry in Firestore (`Patient`, variant `Observation` per HL7 Genomics Reporting IG, `FamilyMemberHistory` / `RelatedPerson`). Write-back as draft `Task` / `Communication` / `RiskAssessment` (`intent: proposal`, `status: draft`). Visible via a "View as FHIR" reveal.
+- **Structures:** AlphaFold DB (public) for the structural story.
+- **Frontend:** React / Vite on Firebase Hosting. **Secrets:** Secret Manager.
+
+---
+
+## K. Data Sources
+
+- **Evidence (real, public):** ClinVar (dated assertion history), ClinGen, OncoKB, CIViC, gnomAD, AlphaMissense (UCSC), AlphaFold DB.
+- **Patients (synthetic):** Synthea-style cohort + a hand-crafted demo family whose MLH1 variant genuinely crossed a reclassification boundary on a known date, including the 1-star "trap" submission for the withhold beat.
+- No real patient data.
+
+---
+
+## L. The Demo (no-login sandbox, the 30-second arc)
+
+A text VUS blooms into a **3D structural story**; the **Bayesian needle climbs** past the actionable line as years of evidence stream in via a visible Fivetran sync; the **Resolution Planner** names the one test that would have resolved it sooner; at the actionable threshold the **family tree ignites**; the **deceased-proband branch routes to ethics review**, not a letter; a **ClinVar submission drafts back** to the world. Wrapped in a **time machine** (rewind to 2019, fast-forward to today) over a genuine historical reclassification, so the judge watches the evidence change and the agent catch it. Every clinical output stamped *DRAFT, clinician review required, not sent.*
+
+---
+
+## M. Evaluation (credibility)
+
+- **ClinVar time-replay backtest:** replay dated assertion history; report precision/recall on variants that genuinely got reclassified, and verify the **trajectory** (weighted the 3-star panel, withheld the 1-star trap), not just the final call. ADK `adk eval` with `.test.json` golden trajectories.
+- **LLM-as-a-Judge** (pairwise, Gemini Pro) on adjudication and resolution-plan quality.
+- **pytest** across all tools including withhold/abstention paths.
+- **Cohort metrics + one cited impact number:** per-patient cascade value and a delayed-surveillance mortality figure from published literature.
+
+---
+
+## N. Differentiation
+
+- **Active vs passive:** the components exist (VUSVista watches, iVar identifies, AlphaMissense scores); the **autonomous active-layer integration** has not been built.
+- **Cascade ignition + give-back** are done by no existing system or competing entry.
+- **Domain authority:** authored by a cancer geneticist; the next-best-evidence reasoning encodes real clinical judgment a CS-only competitor cannot fake.
+- **Partner integration is structural:** the evolving-evidence sync is the mechanism of the loop closing, not decoration.
+
+> Full competitor breakdown: `metadata/differentiation-analysis.md`.
+
+---
+
+## O. Scope Discipline
+
+Build **one loop**, deeply. The two true differentiators are the **Next-Best-Evidence engine** and the **3D structural story**; the Bayesian meter is the connective tissue; cohort and give-back are the "and it scales / and it gives back" beats. Demo one Lynch case to a polish; say disease-agnostic, do not demo every disease. Out of scope: intake, prior auth, NGS report PDF parsing, autonomous messaging, treatment recommendations.
+
+---
+
+## P. Compliance
+
+Built entirely on **Google Cloud AI** (Gemini via Vertex AI, ADK / Agent Runtime, Cloud Run, BigQuery, Firestore, Secret Manager, Firebase Hosting) and the **Fivetran** track partner (connectors + MCP server). The shipped product's AI is Google's; no competing cloud or AI services run in the product. Public repo, OSI license visible.
 
 ---
 
 ## Z. One-line summary
 
-**Unravel watches the world's variant evidence so that when an "uncertain" result quietly becomes a life-or-death one, the patient and their family actually find out, built on Gemini + Google Cloud ADK with Fivetran as the living-evidence heartbeat.**
+**Unravel is the active layer of the variant commons: it resolves a clinic's uncertain variants, activates the at-risk family the moment one turns dangerous, and gives the new evidence back to the world, built on Gemini 3.1 + Google Cloud ADK with Fivetran as the living-evidence heartbeat.**
 
 ---
 
-*Project definition. Last updated 3 June 2026.*
+*Project definition v2. Last updated 3 June 2026.*
