@@ -1,0 +1,24 @@
+import { Link } from 'react-router-dom';
+
+export default function Footer() {
+  return (
+    <footer className="footer">
+      <div className="container" style={{ padding: '2.5rem 2rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontFamily: 'var(--serif)', fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink)' }}>Unravel</div>
+          <div style={{ fontSize: '.85rem', color: 'var(--muted)', marginTop: '.25rem' }}>
+            Closing the diagnostic loop that stays open for years, for the patient and their family.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '1.5rem', fontSize: '.9rem', color: 'var(--muted)', fontWeight: 600, flexWrap: 'wrap' }}>
+          <Link to="/mission">Mission</Link>
+          <Link to="/technology">Technology</Link>
+          <Link to="/app">Simulator</Link>
+        </div>
+        <div style={{ fontSize: '.8rem', color: 'var(--faint)' }}>
+          Gemini 3 · Google ADK · Fivetran · FHIR R4 · draft-only, human-in-the-loop
+        </div>
+      </div>
+    </footer>
+  );
+}
