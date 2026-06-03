@@ -13,13 +13,13 @@ Built for the **Google Cloud Rapid Agent Hackathon** · **Fivetran track**.
 
 - 🔗 **Live demo (no login):** _TODO_
 - 🎥 **3-minute video:** _TODO_
-- 🧬 **Powered by** Gemini 3 · Google ADK → Cloud Run · Fivetran MCP · FHIR R4
+- 🧬 **Powered by** Gemini 3.1 · Google ADK → Cloud Run · Fivetran MCP · FHIR R4
 
 ---
 
 ## The problem
 
-In 2019, **Diane, 44**, had a mastectomy for breast cancer. Her germline panel returned a **VUS in *MLH1***, a Lynch syndrome gene. "Uncertain" means *do nothing*, so nothing was done. Her oncologist said, *"if it ever changes, we'll let you know."*
+In 2019, **Diane, 44**, had surgery for **colorectal cancer**. Her germline panel returned a **VUS in *MLH1***, a Lynch syndrome gene. "Uncertain" means *do nothing*, so nothing was done. Her oncologist said, *"if it ever changes, we'll let you know."*
 
 It changed. In **2023 a ClinGen expert panel reclassified that exact variant to likely pathogenic.** The update went public. **It never reached Diane.** No system was watching. Her 22-year-old daughter, who could have begun colonoscopies at 20 and been offered predictive testing the day the variant flipped, later presented with a tumour that Lynch surveillance is built to catch early.
 
@@ -68,23 +68,41 @@ Detecting a status flip is deterministic. **Adjudicating it is not.** ClinVar ca
 ## Architecture
 
 ```
-ClinVar / ClinGen / OncoKB / CIViC  ──▶  Fivetran  ──▶  BigQuery (evidence warehouse)
-                                                              │
-                  FHIR R4 registry (Patient · variant         │
-                  Observation · FamilyMemberHistory)  ◀────────┘
-                                                              │
-   ADK service (Cloud Run):  Watcher ─▶ Adjudicator ─▶ Cascade Coordinator
-     tools:  Fivetran MCP (get_sync_status / trigger_sync / get_schema)
-             detect_reclassifications()   match_affected_patients()
-             draft_recontact()            [optional] score_variant_alphamissense()
-                                                              │
-                            FHIR R4 write-back ──▶ EHR (draft Task / Communication,
-                            intent: proposal, webhook pattern, no EHR modification)
-                                                              │
-                  React + Vite SPA  ◀──────────────  (Firebase Hosting, no-login sandbox)
+══ EVIDENCE PLANE ═════════════════════════════════════════════════════════
+
+   ClinVar ┐
+   ClinGen ├──▶  FIVETRAN  ──▶  BigQuery  (evidence warehouse)
+   OncoKB  │     continuous sync
+   CIViC   ┘
+
+══ AGENT PLANE ═ ADK multi-agent on Cloud Run ═════════════════════════════
+
+   ┌─────────┐      ┌───────────────┐      ┌────────────────┐
+   │ WATCHER │ ───▶ │  ADJUDICATOR  │ ───▶ │    CASCADE     │
+   │  3.1    │      │   3.1 Pro     │      │  COORDINATOR   │
+   │ Flash-  │      │  (the moat)   │      │    3.1 Pro     │
+   │ Lite    │      │               │      │                │
+   └────┬────┘      └───────┬───────┘      └───────┬────────┘
+        │                   │                      │
+   detect_reclass      reasons over           draft FHIR
+   (data diff)         discordant evidence,    Task / Communication
+        │              GROUNDED in cited        (intent: proposal,
+        ▼              stars + ACMG;             status: draft)
+   BigQuery            WITHHOLDS weak 1★ flips         │
+        ▲                    ⇅                         │
+        │              FIVETRAN MCP                    │
+        │              get_sync_status /               │
+        │              trigger_sync  (mid-loop)        │
+        │                                              │
+   FHIR R4 registry ◀── match_affected_patients ───────┘
+   (Patient · variant Observation · FamilyMemberHistory)
+        │
+        ▼
+   React SPA  (Firebase Hosting, no-login sandbox)
+   clinician REVIEWS and SENDS   ◀── HUMAN IN THE LOOP (draft-only)
 ```
 
-- **Models:** `gemini-3-flash` for high-frequency delta classification; `gemini-3.1-pro` for the final recontact-draft synthesis.
+- **Models:** `gemini-3.1-flash-lite` for high-frequency delta classification; `gemini-3.1-pro-preview` for adjudication and the recontact-draft synthesis.
 - **Partner superpower (deep MCP):** the agent weaves *multiple* Fivetran MCP operations into its reasoning loop, freshness checks, targeted re-syncs, schema + sync-history as the change signal, not a single token call.
 - **Clinical seam, FHIR R4:** like Tracer, but inverted. Tracer fires when the EHR *pushes* a result; Unravel fires when external *evidence* changes, reads the FHIR patient registry, and **writes drafts back**. Aligned to the HL7 Genomics Reporting IG. Same webhook pattern, no EHR modification.
 
@@ -121,7 +139,7 @@ We acknowledge existing work openly, each tool owns only **one** link of the cha
 ## Tech stack
 
 - **Agent:** Google ADK (code-first, Python), deployed to **Cloud Run** / Agent Runtime
-- **Models:** Gemini 3 Flash + Gemini 3.1 Pro (Vertex AI)
+- **Models:** Gemini 3.1 Flash-Lite + Gemini 3.1 Pro (Vertex AI)
 - **Partner MCP:** Fivetran + Fivetran MCP server
 - **Data:** BigQuery (evidence warehouse) · FHIR R4 patient/VUS registry (HAPI FHIR or FHIR-JSON)
 - **Frontend:** React + TypeScript + Vite on Firebase Hosting
@@ -150,14 +168,15 @@ We acknowledge existing work openly, each tool owns only **one** link of the cha
 > Requires a Google Cloud project (Vertex AI, Cloud Run, BigQuery, Firestore, Secret Manager enabled) and a Fivetran account.
 
 ```bash
-# Backend, ADK agent service
+# Backend, ADK agents + API (Python 3.12)
 cd backend
-python -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # set GCP project, Fivetran + FHIR endpoints (via Secret Manager in prod)
-adk run                        # local dev
+cp .env.example .env                      # set GOOGLE_CLOUD_PROJECT (Vertex via Secret Manager in prod)
+python hello.py                           # smoke-test the agent on Vertex AI
+uvicorn server:app --reload --port 8000   # serve the API the SPA calls
 
-# Frontend, React + Vite SPA
+# Frontend, React + Vite SPA (proxies /api to :8000)
 cd ../frontend
 npm install
 npm run dev

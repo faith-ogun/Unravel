@@ -30,7 +30,7 @@ export default function MissionPage() {
             <div className="mono-tag"><span className="dash" /> A true-to-life case · 01</div>
             <h2 className="display display-mid" style={{ margin: '1rem 0 1.3rem' }}>Diane, 44.</h2>
             <div className="body-lg" style={{ display: 'grid', gap: '1rem', maxWidth: '56ch' }}>
-              <p>In 2019 she had a mastectomy for breast cancer. Her germline panel returned a <strong style={{ color: 'var(--ink)' }}>VUS in MLH1</strong>, a Lynch syndrome gene. Nothing was done. Her oncologist said, <em>“if it ever changes, we’ll let you know.”</em></p>
+              <p>In 2019 she had surgery for colorectal cancer. Her germline panel returned a <strong style={{ color: 'var(--ink)' }}>VUS in MLH1</strong>, a Lynch syndrome gene. Nothing was done. Her oncologist said, <em>“if it ever changes, we’ll let you know.”</em></p>
               <p>It changed. In 2023 a ClinGen expert panel reclassified that exact variant to <strong style={{ color: 'var(--ink)' }}>likely pathogenic</strong>. The update went public. It never reached Diane.</p>
             </div>
           </motion.div>

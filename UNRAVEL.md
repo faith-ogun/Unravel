@@ -27,7 +27,7 @@ This is the **"diagnostic loop that never closes"**, the archetype that has repe
 
 ## B. The Named Victim (the opening story)
 
-> In 2019, **Diane, 44**, had a mastectomy for breast cancer. Her germline panel returned a **VUS in *MLH1***, a Lynch syndrome gene. "Uncertain" → nothing was done. Her oncologist said, "If it ever changes, we'll let you know." It changed: in **2023 a ClinGen expert panel reclassified that exact variant to likely pathogenic.** The update went public. It never reached Diane. No system was watching. Her **22-year-old daughter**, who could have started colonoscopies at 20 and been offered predictive testing the day the variant flipped, later presented with a tumor that Lynch surveillance is designed to catch early. The variant was reclassified. The loop never closed.
+> In 2019, **Diane, 44**, had surgery for **colorectal cancer**. Her germline panel returned a **VUS in *MLH1***, a Lynch syndrome gene. "Uncertain" → nothing was done. Her oncologist said, "If it ever changes, we'll let you know." It changed: in **2023 a ClinGen expert panel reclassified that exact variant to likely pathogenic.** The update went public. It never reached Diane. No system was watching. Her **22-year-old daughter**, who could have started colonoscopies at 20 and been offered predictive testing the day the variant flipped, later presented with a tumor that Lynch surveillance is designed to catch early. The variant was reclassified. The loop never closed.
 
 ---
 
@@ -66,7 +66,7 @@ Detecting a status flip is deterministic. **Adjudicating it is not.** ClinVar ca
 ## G. Technical Architecture (Fivetran track)
 
 - **Path:** code-first **ADK (Agent Development Kit) → Cloud Run.**
-- **Models:** `gemini-3-flash` for high-frequency delta classification across many variants; `gemini-3.1-pro` for the final recontact-draft synthesis (two-tier routing). *(Current-gen as of June 2026; Gemini 2.5 still runs until its 16 Oct 2026 retirement but is last-gen.)*
+- **Models:** `gemini-3.1-flash-lite` for high-frequency delta classification across many variants; `gemini-3.1-pro-preview` for adjudication and the recontact-draft synthesis (two-tier routing). *(Verified available in project `unravel-ra` at location `global`, 3 Jun 2026; GA `gemini-3.1-pro` and full `gemini-3.1-flash` not yet enabled there.)*
 - **Fivetran seam (load-bearing):** Fivetran syncs the evidence feeds into a destination; the ADK agent calls the **Fivetran MCP server** to (1) check freshness before any evaluation, (2) trigger an on-demand sync, (3) read sync history to find which feeds changed. The agent manages **multiple** evolving feeds, connector sprawl + freshness + agentic tool-use, not a single `curl`.
 - **Agent tools:**
   - `fivetran.get_sync_status` · `fivetran.trigger_sync` · `fivetran.get_schema` (via MCP)

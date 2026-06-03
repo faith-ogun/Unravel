@@ -96,7 +96,7 @@ export default function AppDashboard() {
                 <div>
                   <div style={{ fontSize: '.72rem', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--blue)', marginBottom: '.4rem' }}>FHIR R4 · Patient registry</div>
                   <h3 style={{ fontSize: '1.4rem' }}>Diane O. · 44</h3>
-                  <p style={{ color: 'var(--muted)', fontSize: '.95rem' }}>Breast cancer (mastectomy, 2019) · pedigree: daughter 22, sister 49</p>
+                  <p style={{ color: 'var(--muted)', fontSize: '.95rem' }}>Colorectal cancer (resection, 2019) · pedigree: daughter 22, sister 49</p>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div className="mono" style={{ fontSize: '.7rem', color: 'var(--faint)' }}>LAST ENCOUNTER</div>
