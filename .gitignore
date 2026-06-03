@@ -1,6 +1,9 @@
 # Internal strategy / planning notes (kept private, not for public repo)
 metadata/
 
+# Reference papers (copyrighted whitepapers + generated md/json), kept local
+refs/
+
 # Node / Vite
 node_modules/
 dist/

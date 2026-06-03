@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { getHealth, runWatch, type WatchResult } from '../api';
 import { Database, ShieldAlert, Share2, FileText, ChevronRight, Dna, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -22,15 +23,26 @@ export default function AppDashboard() {
   const [year, setYear] = useState(2019);
   const [syncing, setSyncing] = useState(false);
   const [viewFhir, setViewFhir] = useState(false);
+  const [backend, setBackend] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [watch, setWatch] = useState<WatchResult | null>(null);
 
   const stage = stageFor(year);
   const fired = stage === 'fire' || stage === 'closed';
   const pct = ((year - 2019) / 7) * 100;
 
+  // Ping the backend on mount so the UI reflects a real connection.
+  useEffect(() => {
+    getHealth().then(() => setBackend('online')).catch(() => setBackend('offline'));
+  }, []);
+
   const onYear = (v: number) => {
     setYear(v);
     setSyncing(true);
-    window.setTimeout(() => setSyncing(false), 800);
+    // Real round-trip to the backend; the local demo still works if it is offline.
+    runWatch(v)
+      .then(res => { setWatch(res); setBackend('online'); })
+      .catch(() => setBackend('offline'))
+      .finally(() => window.setTimeout(() => setSyncing(false), 400));
   };
 
   return (
@@ -43,10 +55,18 @@ export default function AppDashboard() {
             <h1 className="display" style={{ fontSize: 'clamp(1.9rem,1rem+2.5vw,2.6rem)', margin: '.7rem 0 .4rem' }}>Evidence watch, a time machine</h1>
             <p style={{ color: 'var(--muted)' }}>Drag the year. Watch the evidence change, the agent reason, and the loop close.</p>
           </div>
-          <div className="pill">
-            <Database size={15} color="var(--thread)" />
-            <span className="mono" style={{ fontWeight: 600, color: 'var(--ink)' }}>FIVETRAN: {syncing ? 'SYNCING' : 'IDLE'}</span>
-            <span className={syncing ? 'pulsing' : ''} style={{ width: 8, height: 8, borderRadius: 9, background: syncing ? 'var(--thread)' : 'var(--line-2)' }} />
+          <div style={{ display: 'flex', gap: '.6rem', flexWrap: 'wrap' }}>
+            <div className="pill">
+              <Database size={15} color="var(--thread)" />
+              <span className="mono" style={{ fontWeight: 600, color: 'var(--ink)' }}>FIVETRAN: {syncing ? 'SYNCING' : 'IDLE'}</span>
+              <span className={syncing ? 'pulsing' : ''} style={{ width: 8, height: 8, borderRadius: 9, background: syncing ? 'var(--thread)' : 'var(--line-2)' }} />
+            </div>
+            <div className="pill" title={watch ? `backend decision: ${watch.decision}` : undefined}>
+              <span className="mono" style={{ fontWeight: 600, color: 'var(--ink)' }}>
+                API: {backend === 'checking' ? '…' : backend === 'online' ? 'CONNECTED' : 'OFFLINE'}
+              </span>
+              <span style={{ width: 8, height: 8, borderRadius: 9, background: backend === 'online' ? 'var(--benign, #1a7f5a)' : backend === 'offline' ? 'var(--path-d, #c0392b)' : 'var(--line-2)' }} />
+            </div>
           </div>
         </header>
 
