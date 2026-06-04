@@ -4,9 +4,9 @@ export default function Footer() {
   return (
     <footer className="footer">
       <div className="container" style={{ padding: '2.5rem 2rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <div style={{ fontFamily: 'var(--serif)', fontSize: '1.25rem', fontWeight: 600, color: 'var(--ink)' }}>Unravel</div>
-          <div style={{ fontSize: '.85rem', color: 'var(--muted)', marginTop: '.25rem' }}>
+        <div style={{ maxWidth: '380px' }}>
+          <img src="/logo-footer.png" alt="Unravel" style={{ height: '60px', width: 'auto' }} />
+          <div style={{ fontSize: '.85rem', color: 'var(--muted)', marginTop: '.55rem' }}>
             Closing the diagnostic loop that stays open for years, for the patient and their family.
           </div>
         </div>
