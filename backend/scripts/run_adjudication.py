@@ -26,9 +26,9 @@ from unravel.evidence import build_evidence_ledger  # noqa: E402
 from unravel import fivetran_mcp as ftm  # noqa: E402
 
 CASES = {
-    "diane-okafor": "HERO  (MLH1 c.114C>G, 3-star expert panel)",
-    "john-okeke": "TRAP  (MLH1 c.293G>A, 1-star conflicting)",
-    "kemi-balogun": "DOWNGRADE (MLH1 c.655A>G, now benign)",
+    "diane-marchetti": "HERO  (MLH1 c.114C>G, 3-star expert panel)",
+    "eric-larsson": "TRAP  (MLH1 c.293G>A, 1-star conflicting)",
+    "grace-mensah": "DOWNGRADE (MLH1 c.655A>G, now benign)",
 }
 
 

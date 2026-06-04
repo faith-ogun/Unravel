@@ -15,11 +15,11 @@ def test_cohort_shape():
 
 def test_proband_and_relatives():
     patients = {p["id"]: p for p in registry.build_resources()["Patient"]}
-    diane = patients["diane-okafor"]
+    diane = patients["diane-marchetti"]
     assert any(e.get("valueString") == "proband" for e in diane.get("extension", []))
     relatives = [p["id"] for p in patients.values()
                  if any(e.get("url", "").endswith("relative-of") for e in p.get("extension", []))]
-    assert {"grace-okafor", "ada-okafor", "emeka-okafor", "david-bello"} <= set(relatives)
+    assert {"laura-marchetti", "sofia-marchetti", "marco-marchetti", "david-nguyen"} <= set(relatives)
 
 
 def test_hero_observation_round_trips_to_variant_key():
@@ -39,4 +39,4 @@ def test_silent_dianes_share_the_hero_variant():
 
 def test_deceased_carrier_present():
     patients = {p["id"]: p for p in registry.build_resources()["Patient"]}
-    assert patients["samuel-bello"]["deceasedBoolean"] is True
+    assert patients["thomas-nguyen"]["deceasedBoolean"] is True

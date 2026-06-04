@@ -28,7 +28,7 @@ HERO_ROW = {"gene_symbol": "MLH1", "gnomad_af": None,
 
 
 def test_grounding_carries_review_status_and_cited_evidence():
-    r = _reclass("diane-okafor", "3-36993661-C-G", "c.114C>G", "Pathogenic", 3)
+    r = _reclass("diane-marchetti", "3-36993661-C-G", "c.114C>G", "Pathogenic", 3)
     ctx = build_evidence_ledger(r.variant, row=HERO_ROW)
     prompt = grounding_prompt(r, ctx)
     assert "3-star" in prompt
@@ -38,8 +38,8 @@ def test_grounding_carries_review_status_and_cited_evidence():
 
 
 def test_hero_and_trap_grounding_differ_only_in_review_status():
-    hero = _reclass("diane-okafor", "3-36993661-C-G", "c.114C>G", "Pathogenic", 3)
-    trap = _reclass("john-okeke", "3-37001040-G-A", "c.293G>A",
+    hero = _reclass("diane-marchetti", "3-36993661-C-G", "c.114C>G", "Pathogenic", 3)
+    trap = _reclass("eric-larsson", "3-37001040-G-A", "c.293G>A",
                     "Conflicting classifications of pathogenicity", 1)
     ph = grounding_prompt(hero, build_evidence_ledger(hero.variant, row=HERO_ROW))
     pt = grounding_prompt(trap, build_evidence_ledger(trap.variant, row=HERO_ROW))

@@ -14,14 +14,15 @@ classification and the *current* evidence. detect_reclassifications() diffs the
 two; build_evidence_ledger() + the Adjudicator decide whether the change is real
 and actionable.
 
-The seeded cohort centres on Diane Okafor, who carries MLH1 c.114C>G
+The seeded cohort centres on Diane Marchetti, who carries MLH1 c.114C>G
 (p.Asn38Lys), recorded as a VUS at her 2019 colorectal-cancer work-up. ClinVar
 has since reclassified that variant to Pathogenic (3-star, expert panel), but the
 news never reached Diane's family. The cohort also contains three "silent Dianes"
 carrying the same variant, a deceased carrier (for the Steward's ethics branch),
 a 1-star "trap" carrier whose tempting variant must be withheld, and benign /
-unrelated cohort filler. Every variant is a real ClinVar/Lynch variant present in
-the evidence warehouse, so the registry and the science line up.
+unrelated cohort filler. The patients are a deliberately mixed, fictional cohort.
+Every variant is a real ClinVar/Lynch variant present in the evidence warehouse,
+so the registry and the science line up.
 
 Genomic variants are stored on the Observation as a single component (LOINC
 81252-9) carrying the canonical `chrom-pos-ref-alt` GRCh38 id, so the agent tools
@@ -160,29 +161,29 @@ def build_resources() -> dict[str, list[dict]]:
     observations: list[dict] = []
     histories: list[dict] = []
 
-    # 1) The Okafor family (the hero case).
+    # 1) The Marchetti family (the hero case).
     patients.append(_patient(
-        "diane-okafor", "Okafor", "Diane", "female", "1971-04-12",
+        "diane-marchetti", "Marchetti", "Diane", "female", "1971-04-12",
         role="proband", conditions=["Colorectal cancer (dx 2019, age 48)"]))
     observations.append(_observation(
-        "obs-diane", "diane-okafor", HERO, "Uncertain significance", "2019-03-15"))
+        "obs-diane", "diane-marchetti", HERO, "Uncertain significance", "2019-03-15"))
     # at-risk relatives, untested
-    patients.append(_patient("grace-okafor", "Okafor", "Grace", "female", "1968-09-02",
-                             relative_of="diane-okafor", relationship="sister"))
-    patients.append(_patient("ada-okafor", "Okafor", "Ada", "female", "1998-06-20",
-                             relative_of="diane-okafor", relationship="daughter"))
-    patients.append(_patient("emeka-okafor", "Okafor", "Emeka", "male", "2001-11-30",
-                             relative_of="diane-okafor", relationship="son"))
-    histories.append(_family_history("fmh-diane-mother", "diane-okafor", "MTH", "mother",
+    patients.append(_patient("laura-marchetti", "Marchetti", "Laura", "female", "1968-09-02",
+                             relative_of="diane-marchetti", relationship="sister"))
+    patients.append(_patient("sofia-marchetti", "Marchetti", "Sofia", "female", "1998-06-20",
+                             relative_of="diane-marchetti", relationship="daughter"))
+    patients.append(_patient("marco-marchetti", "Marchetti", "Marco", "male", "2001-11-30",
+                             relative_of="diane-marchetti", relationship="son"))
+    histories.append(_family_history("fmh-diane-mother", "diane-marchetti", "MTH", "mother",
                                      deceased=True, condition="Colorectal cancer", onset_age=47))
-    histories.append(_family_history("fmh-diane-aunt", "diane-okafor", "MAUNT",
+    histories.append(_family_history("fmh-diane-aunt", "diane-marchetti", "MAUNT",
                                      "maternal aunt", condition="Endometrial cancer", onset_age=52))
 
     # 2) Three "silent Dianes": same hero variant, recorded VUS, family never recontacted.
     silent = [
-        ("mary-adeyinka", "Adeyinka", "Mary", "female", "1965-02-11", "2017-08-01"),
-        ("peter-nwosu", "Nwosu", "Peter", "male", "1979-05-23", "2020-01-14"),
-        ("ngozi-eze", "Eze", "Ngozi", "female", "1983-12-05", "2021-06-30"),
+        ("mei-tanaka", "Tanaka", "Mei", "female", "1965-02-11", "2017-08-01"),
+        ("rajesh-patel", "Patel", "Rajesh", "male", "1979-05-23", "2020-01-14"),
+        ("sarah-cohen", "Cohen", "Sarah", "female", "1983-12-05", "2021-06-30"),
     ]
     for pid, fam, giv, sex, dob, rec in silent:
         patients.append(_patient(pid, fam, giv, sex, dob, role="carrier",
@@ -191,27 +192,27 @@ def build_resources() -> dict[str, list[dict]]:
                                          "Uncertain significance", rec))
 
     # 3) Deceased carrier (Steward ethics branch) with a living at-risk child.
-    patients.append(_patient("samuel-bello", "Bello", "Samuel", "male", "1952-07-19",
+    patients.append(_patient("thomas-nguyen", "Nguyen", "Thomas", "male", "1952-07-19",
                              deceased=True, role="carrier",
                              conditions=["Colorectal cancer (deceased)"]))
-    observations.append(_observation("obs-samuel", "samuel-bello", MSH2_LP,
+    observations.append(_observation("obs-thomas", "thomas-nguyen", MSH2_LP,
                                      "Uncertain significance", "2015-04-10"))
-    patients.append(_patient("david-bello", "Bello", "David", "male", "1986-03-08",
-                             relative_of="samuel-bello", relationship="son"))
+    patients.append(_patient("david-nguyen", "Nguyen", "David", "male", "1986-03-08",
+                             relative_of="thomas-nguyen", relationship="son"))
 
     # 4) The 1-star trap carrier: tempting variant, must be withheld.
-    patients.append(_patient("john-okeke", "Okeke", "John", "male", "1975-10-02",
+    patients.append(_patient("eric-larsson", "Larsson", "Eric", "male", "1975-10-02",
                              role="carrier"))
-    observations.append(_observation("obs-john", "john-okeke", TRAP,
+    observations.append(_observation("obs-eric", "eric-larsson", TRAP,
                                      "Uncertain significance", "2018-11-22"))
 
     # 5) Benign / unrelated cohort filler (no action expected).
     filler = [
-        ("amaka-obi", "Obi", "Amaka", "female", "1990-01-15", MLH1_BENIGN, "Benign", "2019-02-01"),
-        ("tunde-lawal", "Lawal", "Tunde", "male", "1972-08-09", MSH6_BENIGN, "Benign", "2020-09-12"),
-        ("chioma-udo", "Udo", "Chioma", "female", "1988-04-27", EPCAM_BENIGN, "Benign", "2021-03-03"),
+        ("lucia-romero", "Romero", "Lucia", "female", "1990-01-15", MLH1_BENIGN, "Benign", "2019-02-01"),
+        ("wei-chen", "Chen", "Wei", "male", "1972-08-09", MSH6_BENIGN, "Benign", "2020-09-12"),
+        ("hannah-schmidt", "Schmidt", "Hannah", "female", "1988-04-27", EPCAM_BENIGN, "Benign", "2021-03-03"),
         # recorded VUS but now benign: a downgrade, not an alarm
-        ("kemi-balogun", "Balogun", "Kemi", "female", "1969-06-18", MLH1_BENIGN,
+        ("grace-mensah", "Mensah", "Grace", "female", "1969-06-18", MLH1_BENIGN,
          "Uncertain significance", "2016-05-20"),
     ]
     for pid, fam, giv, sex, dob, variant, rec_class, rec_date in filler:

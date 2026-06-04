@@ -95,7 +95,7 @@ export default function AppDashboard() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: '1.3rem', marginBottom: '1.3rem', borderBottom: '1px solid var(--line)' }}>
                 <div>
                   <div style={{ fontSize: '.72rem', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--blue)', marginBottom: '.4rem' }}>FHIR R4 · Patient registry</div>
-                  <h3 style={{ fontSize: '1.4rem' }}>Diane O. · 44</h3>
+                  <h3 style={{ fontSize: '1.4rem' }}>Diane M. · 44</h3>
                   <p style={{ color: 'var(--muted)', fontSize: '.95rem' }}>Colorectal cancer (resection, 2019) · pedigree: daughter 22, sister 49</p>
                 </div>
                 <div style={{ textAlign: 'right' }}>
@@ -139,7 +139,7 @@ export default function AppDashboard() {
                       <div style={{ fontSize: '.72rem', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--path-d)', marginBottom: '.6rem' }}>
                         Affected-family board · 2 relatives flagged
                       </div>
-                      <FamilyRow name="Diane O. · 44" tag="proband" />
+                      <FamilyRow name="Diane M. · 44" tag="proband" />
                       <FamilyRow name="Daughter · 22" tag="1st-degree · at-risk" hot />
                       <FamilyRow name="Sister · 49" tag="1st-degree · at-risk" hot last />
                     </div>

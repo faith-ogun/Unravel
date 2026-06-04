@@ -34,13 +34,13 @@ def test_detects_hero_and_silent_dianes_as_escalations():
     hero_escalations = [d for d in dets
                         if d.variant == registry.HERO.key and d.is_escalation]
     assert {d.patient_id for d in hero_escalations} == {
-        "diane-okafor", "mary-adeyinka", "peter-nwosu", "ngozi-eze"}
+        "diane-marchetti", "mei-tanaka", "rajesh-patel", "sarah-cohen"}
 
 
 def test_downgrade_is_flagged_but_not_escalation():
     data = _data()
     dets = detect_reclassifications(data=data, current=_current_for(data))
-    kemi = next(d for d in dets if d.patient_id == "kemi-balogun")
+    kemi = next(d for d in dets if d.patient_id == "grace-mensah")
     assert kemi.direction == "downgrade"
     assert not kemi.is_escalation
 
@@ -49,15 +49,15 @@ def test_unchanged_benign_filler_not_flagged():
     data = _data()
     dets = detect_reclassifications(data=data, current=_current_for(data))
     flagged = {d.patient_id for d in dets}
-    assert "amaka-obi" not in flagged
-    assert "tunde-lawal" not in flagged
-    assert "chioma-udo" not in flagged
+    assert "lucia-romero" not in flagged
+    assert "wei-chen" not in flagged
+    assert "hannah-schmidt" not in flagged
 
 
 def test_trap_is_detected_for_the_adjudicator_to_withhold():
     data = _data()
     dets = detect_reclassifications(data=data, current=_current_for(data))
-    john = next(d for d in dets if d.patient_id == "john-okeke")
+    john = next(d for d in dets if d.patient_id == "eric-larsson")
     assert john.is_escalation
     assert john.review_stars == 1  # low confidence: the Adjudicator will withhold
 
@@ -66,22 +66,22 @@ def test_since_filters_out_records_newer_than_floor():
     data = _data()
     # Diane's record is 2019-03-15; a 2015 floor means her record is NOT stale.
     dets = detect_reclassifications(since="2015-01-01", data=data, current=_current_for(data))
-    assert "diane-okafor" not in {d.patient_id for d in dets}
-    # Samuel's record is 2015-04-10 > 2015-01-01, also excluded.
-    assert "samuel-bello" not in {d.patient_id for d in dets}
+    assert "diane-marchetti" not in {d.patient_id for d in dets}
+    # Thomas's record is 2015-04-10 > 2015-01-01, also excluded.
+    assert "thomas-nguyen" not in {d.patient_id for d in dets}
 
 
 def test_match_affected_patients_returns_carriers_and_relatives():
     data = _data()
     m = registry.match_affected_patients(registry.HERO.key, data=data)
     assert {c["patient"]["id"] for c in m["carriers"]} == {
-        "diane-okafor", "mary-adeyinka", "peter-nwosu", "ngozi-eze"}
+        "diane-marchetti", "mei-tanaka", "rajesh-patel", "sarah-cohen"}
     assert {r["patient"]["id"] for r in m["relatives"]} == {
-        "ada-okafor", "emeka-okafor", "grace-okafor"}
+        "sofia-marchetti", "marco-marchetti", "laura-marchetti"}
 
 
 def test_match_includes_deceased_carrier_flag():
     data = _data()
     m = registry.match_affected_patients(registry.MSH2_LP.key, data=data)
-    samuel = next(c for c in m["carriers"] if c["patient"]["id"] == "samuel-bello")
+    samuel = next(c for c in m["carriers"] if c["patient"]["id"] == "thomas-nguyen")
     assert samuel["deceased"] is True
