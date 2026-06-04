@@ -23,6 +23,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from unravel.adjudicator import adjudicate  # noqa: E402
 from unravel.detection import detect_reclassifications  # noqa: E402
 from unravel.evidence import build_evidence_ledger  # noqa: E402
+from unravel import fivetran_mcp as ftm  # noqa: E402
 
 CASES = {
     "diane-okafor": "HERO  (MLH1 c.114C>G, 3-star expert panel)",
@@ -32,7 +33,19 @@ CASES = {
 
 
 def main() -> None:
-    print(f"[adjudicator] Vertex project={os.getenv('GOOGLE_CLOUD_PROJECT', '(unset)')}\n")
+    print(f"[adjudicator] Vertex project={os.getenv('GOOGLE_CLOUD_PROJECT', '(unset)')}")
+
+    # Deep MCP in the loop: ask the Fivetran MCP server how fresh the evidence is,
+    # then trigger a targeted re-sync of any stale feed before adjudicating.
+    feeds = ftm.check_freshness()
+    freshness = ftm.freshness_report(feeds)
+    print(f"[adjudicator] {freshness}")
+    for f in feeds:
+        if f.is_stale:
+            print(f"[adjudicator] {f.schema} is stale; triggering targeted re-sync...")
+            ftm.trigger_resync(f.connection_id)
+    print()
+
     dets = {d.patient_id: d for d in detect_reclassifications()}
 
     for pid, label in CASES.items():
@@ -41,7 +54,7 @@ def main() -> None:
             print(f"== {label}: no reclassification detected, skipping ==\n")
             continue
         ctx = build_evidence_ledger(reclass.variant)
-        adj = adjudicate(reclass, ctx, freshness="gnomAD + AlphaMissense synced today (fresh)")
+        adj = adjudicate(reclass, ctx, freshness=freshness)
         p, v = adj.posterior, adj.verdict
         print(f"== {label} :: {pid} ==")
         print(f"  posterior: {p.posterior:.2f} ({p.points} pts, {p.band.value}); "
