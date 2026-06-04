@@ -5,3 +5,5 @@ uvicorn>=0.30
 
 # dev / test
 pytest>=8.0
+mcp>=1.0          # MCP client for the Fivetran MCP smoke test
+uv>=0.5           # provides uvx to launch github.com/fivetran/fivetran-mcp
