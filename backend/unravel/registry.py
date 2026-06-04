@@ -275,3 +275,56 @@ def observation_field(obs: dict, code: str) -> str | None:
 
 def recorded_classification(obs: dict) -> str | None:
     return observation_field(obs, "53037-8")
+
+
+def _relative_of(patient: dict) -> tuple[str, str] | None:
+    """(proband_id, relationship) if this patient is recorded as a relative."""
+    for ext in patient.get("extension", []):
+        if ext.get("url", "").endswith("relative-of"):
+            proband = relationship = None
+            for sub in ext.get("extension", []):
+                if sub.get("url") == "proband":
+                    proband = sub.get("valueReference", {}).get("reference", "").split("/")[-1]
+                elif sub.get("url") == "relationship":
+                    relationship = sub.get("valueString")
+            if proband:
+                return proband, relationship or "relative"
+    return None
+
+
+def match_affected_patients(variant: VariantKey, *, data=None, client=None) -> dict:
+    """Carriers of a variant plus their untested at-risk relatives.
+
+    Returns {"variant", "carriers": [...], "relatives": [...]}. Each carrier
+    carries patient + recorded classification; each relative carries patient +
+    relationship + the carrier they descend from. This feeds the Cascade
+    Coordinator's recontact drafting.
+    """
+    data = data or fetch_all(client)
+    patients = {p["id"]: p for p in data["Patient"]}
+
+    carrier_ids: list[str] = []
+    for obs in data["Observation"]:
+        if observation_variant(obs) == variant:
+            carrier_ids.append(obs["subject"]["reference"].split("/")[-1])
+    carrier_set = set(carrier_ids)
+
+    carriers = []
+    for cid in carrier_ids:
+        p = patients.get(cid, {"id": cid})
+        obs = next((o for o in data["Observation"]
+                    if o["subject"]["reference"].endswith(cid)
+                    and observation_variant(o) == variant), None)
+        carriers.append({
+            "patient": p,
+            "recorded_classification": recorded_classification(obs) if obs else None,
+            "deceased": p.get("deceasedBoolean", False),
+        })
+
+    relatives = []
+    for p in patients.values():
+        rel = _relative_of(p)
+        if rel and rel[0] in carrier_set:
+            relatives.append({"patient": p, "relationship": rel[1], "carrier_id": rel[0]})
+
+    return {"variant": variant, "carriers": carriers, "relatives": relatives}
