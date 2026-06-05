@@ -72,8 +72,12 @@ EPCAM_BENIGN = VariantSpec("2-47373967-T-C", "EPCAM", "c.344T>C", "p.Met115Thr",
 # --- FHIR builders -------------------------------------------------------------
 
 
+RECONTACT_URL = "https://unravel.health/fhir/recontact-status"
+
+
 def _patient(pid, family, given, gender, birth, *, deceased=False,
-             role=None, relative_of=None, relationship=None, conditions=None):
+             role=None, relative_of=None, relationship=None, conditions=None,
+             email=None, phone=None, recontact="not contacted"):
     res = {
         "resourceType": "Patient",
         "id": pid,
@@ -82,7 +86,14 @@ def _patient(pid, family, given, gender, birth, *, deceased=False,
         "birthDate": birth,
         "deceasedBoolean": deceased,
     }
-    extensions = []
+    telecom = []
+    if email:
+        telecom.append({"system": "email", "value": email})
+    if phone:
+        telecom.append({"system": "phone", "value": phone})
+    if telecom:
+        res["telecom"] = telecom
+    extensions = [{"url": RECONTACT_URL, "valueString": recontact}]
     if role:
         extensions.append({"url": "https://unravel.health/fhir/role", "valueString": role})
     if relative_of:
@@ -164,14 +175,17 @@ def build_resources() -> dict[str, list[dict]]:
     # 1) The Marchetti family (the hero case).
     patients.append(_patient(
         "diane-marchetti", "Marchetti", "Diane", "female", "1971-04-12",
-        role="proband", conditions=["Colorectal cancer (dx 2019, age 48)"]))
+        role="proband", conditions=["Colorectal cancer (dx 2019, age 48)"],
+        email="diane.marchetti@example.com", phone="+1-415-555-0142"))
     observations.append(_observation(
         "obs-diane", "diane-marchetti", HERO, "Uncertain significance", "2019-03-15"))
-    # at-risk relatives, untested
+    # at-risk relatives, untested (Marco has no email on file -> shows the contact gap)
     patients.append(_patient("laura-marchetti", "Marchetti", "Laura", "female", "1968-09-02",
-                             relative_of="diane-marchetti", relationship="sister"))
+                             relative_of="diane-marchetti", relationship="sister",
+                             email="laura.marchetti@example.com"))
     patients.append(_patient("sofia-marchetti", "Marchetti", "Sofia", "female", "1998-06-20",
-                             relative_of="diane-marchetti", relationship="daughter"))
+                             relative_of="diane-marchetti", relationship="daughter",
+                             email="sofia.m@example.com", phone="+1-415-555-0188"))
     patients.append(_patient("marco-marchetti", "Marchetti", "Marco", "male", "2001-11-30",
                              relative_of="diane-marchetti", relationship="son"))
     histories.append(_family_history("fmh-diane-mother", "diane-marchetti", "MTH", "mother",
@@ -198,7 +212,8 @@ def build_resources() -> dict[str, list[dict]]:
     observations.append(_observation("obs-thomas", "thomas-nguyen", MSH2_LP,
                                      "Uncertain significance", "2015-04-10"))
     patients.append(_patient("david-nguyen", "Nguyen", "David", "male", "1986-03-08",
-                             relative_of="thomas-nguyen", relationship="son"))
+                             relative_of="thomas-nguyen", relationship="son",
+                             email="david.nguyen@example.com"))
 
     # 4) The 1-star trap carrier: tempting variant, must be withheld.
     patients.append(_patient("eric-larsson", "Larsson", "Eric", "male", "1975-10-02",
@@ -329,3 +344,102 @@ def match_affected_patients(variant: VariantKey, *, data=None, client=None) -> d
             relatives.append({"patient": p, "relationship": rel[1], "carrier_id": rel[0]})
 
     return {"variant": variant, "carriers": carriers, "relatives": relatives}
+
+
+# --- contact + pedigree --------------------------------------------------------
+
+
+def patient_email(p: dict) -> str | None:
+    return next((t["value"] for t in p.get("telecom", []) if t.get("system") == "email"), None)
+
+
+def patient_phone(p: dict) -> str | None:
+    return next((t["value"] for t in p.get("telecom", []) if t.get("system") == "phone"), None)
+
+
+def recontact_status(p: dict) -> str:
+    for ext in p.get("extension", []):
+        if ext.get("url") == RECONTACT_URL:
+            return ext.get("valueString", "not contacted")
+    return "not contacted"
+
+
+def _person(p: dict, *, relationship: str, carrier: bool, recorded: str | None = None) -> dict:
+    n = (p.get("name") or [{}])[0]
+    return {
+        "id": p.get("id"),
+        "name": f"{' '.join(n.get('given', []))} {n.get('family', '')}".strip(),
+        "relationship": relationship,
+        "deceased": p.get("deceasedBoolean", False),
+        "carrier": carrier,
+        "recorded_classification": recorded,
+        "email": patient_email(p),
+        "phone": patient_phone(p),
+        "recontact_status": recontact_status(p),
+    }
+
+
+def pedigree(seed_id: str, *, data=None, client=None) -> dict:
+    """The family around a carrier: proband + at-risk relatives, with contact state.
+
+    Given any carrier (or relative), find the proband they belong to and return the
+    whole pedigree with each member's carrier status, contact details, and whether
+    a recontact has been drafted/sent.
+    """
+    data = data or fetch_all(client)
+    patients = {p["id"]: p for p in data["Patient"]}
+    carrier_ids = {o["subject"]["reference"].split("/")[-1] for o in data["Observation"]}
+
+    # resolve the proband: the seed itself if it is a proband/carrier, else its proband
+    seed = patients.get(seed_id, {})
+    rel = _relative_of(seed)
+    proband_id = rel[0] if rel else seed_id
+    proband = patients.get(proband_id, seed)
+    proband_obs = next((o for o in data["Observation"]
+                        if o["subject"]["reference"].endswith(proband_id)), None)
+
+    members = [_person(proband, relationship="proband", carrier=proband_id in carrier_ids,
+                       recorded=recorded_classification(proband_obs) if proband_obs else None)]
+    fmh = [{"relationship": (h.get("relationship", {}).get("coding", [{}])[0].get("display")),
+            "deceased": h.get("deceasedBoolean", False),
+            "condition": (h.get("condition", [{}])[0].get("code", {}).get("text")
+                          if h.get("condition") else None)}
+           for h in data["FamilyMemberHistory"]
+           if h.get("patient", {}).get("reference", "").endswith(proband_id)]
+
+    for p in patients.values():
+        r = _relative_of(p)
+        if r and r[0] == proband_id:
+            members.append(_person(p, relationship=r[1], carrier=p["id"] in carrier_ids))
+
+    return {
+        "proband_id": proband_id,
+        "members": members,
+        "history": fmh,
+        "needs_contact": [m for m in members if m["relationship"] != "proband" and not m["carrier"]],
+    }
+
+
+def add_patient(*, given: str, family: str, gender: str = "unknown", birth: str = "",
+                email: str | None = None, phone: str | None = None,
+                relative_of: str | None = None, relationship: str | None = None,
+                gene: str | None = None, hgvs_c: str | None = None, gid: str | None = None,
+                recorded_class: str = "Uncertain significance", client=None) -> dict:
+    """Add a patient (and optional variant observation) to the Firestore registry."""
+    client = client or get_client()
+    pid = f"{given}-{family}".lower().replace(" ", "-")
+    role = "carrier" if gid else None
+    patient = _patient(pid, family, given, gender or "unknown", birth or "1980-01-01",
+                       role=role, relative_of=relative_of, relationship=relationship,
+                       email=email, phone=phone)
+    client.collection("Patient").document(pid).set(patient)
+
+    obs_written = None
+    if gid and gene and hgvs_c:
+        chrom, pos, ref, alt = gid.split("-")
+        spec = VariantSpec(gid, gene, hgvs_c, "", recorded_class)
+        obs = _observation(f"obs-{pid}", pid, spec, recorded_class, "2024-01-01")
+        client.collection("Observation").document(f"obs-{pid}").set(obs)
+        obs_written = f"obs-{pid}"
+
+    return {"patient_id": pid, "observation": obs_written, "ok": True}
