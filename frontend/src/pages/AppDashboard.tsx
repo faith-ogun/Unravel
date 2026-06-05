@@ -1,272 +1,550 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { getHealth, runWatch, type WatchResult } from '../api';
-import { Database, ShieldAlert, Share2, FileText, ChevronRight, Dna, Clock } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Database, Dna, Cpu, Box, Sparkles, Eye, Scale, GitBranch, Users, ShieldCheck,
+  List, Network, UserPlus,
+} from 'lucide-react';
+import {
+  getCohort, getFreshness, resync, adjudicate, getPlan, getCascade, getSteward, getStructural,
+  type CohortRow, type Feed, type Adjudication, type ResolutionPlan,
+  type CascadeResult, type StewardResult, type Structural,
+} from '../api';
+import PedigreeView from '../dash/PedigreeView';
+import GraphView from '../dash/GraphView';
+import AddPatientView from '../dash/AddPatientView';
 
-type Stage = 'baseline' | 'withhold' | 'fire' | 'closed';
+type View = 'watchlist' | 'pedigree' | 'graph' | 'add';
+const NAV: { id: View; label: string; icon: typeof List }[] = [
+  { id: 'watchlist', label: 'Watchlist', icon: List },
+  { id: 'pedigree', label: 'Pedigree', icon: Users },
+  { id: 'graph', label: 'Graph', icon: Network },
+  { id: 'add', label: 'Add patient', icon: UserPlus },
+];
 
-function stageFor(year: number): Stage {
-  if (year < 2020) return 'baseline';
-  if (year < 2023) return 'withhold';
-  if (year < 2025) return 'fire';
-  return 'closed';
-}
+type NodeState = 'idle' | 'running' | 'done' | 'held';
+interface LogLine { agent: string; text: string; tone: 'ok' | 'warn' | 'info'; }
 
-const narration: Record<Stage, string> = {
-  baseline: 'Diane is tested. The MLH1 variant is filed as uncertain. She is told "we\'ll let you know if it changes."',
-  withhold: 'A single 1★ submission appears. A naïve watcher would fire a false alarm, Unravel withholds it.',
-  fire: 'A ClinGen expert panel reclassifies the variant. Fivetran catches it, the agent confirms it, and the family lights up.',
-  closed: 'Without Unravel, the loop stays open, and years later the daughter presents with a preventable-stage tumour.',
+const AGENTS = ['Watcher', 'Adjudicator', 'Planner', 'Cascade', 'Steward'] as const;
+type Agent = typeof AGENTS[number];
+const AGENT_ICON: Record<Agent, typeof Eye> = {
+  Watcher: Eye, Adjudicator: Scale, Planner: GitBranch, Cascade: Users, Steward: ShieldCheck,
+};
+const SOURCE_ICON: Record<string, typeof Database> = {
+  clinvar: Database, gnomad: Dna, alphamissense: Cpu, alphafold: Box, gemini: Sparkles,
 };
 
+function bandColor(band: string) {
+  const b = (band || '').toLowerCase();
+  if (b.includes('pathogenic')) return { fg: 'var(--path-d)', bg: 'var(--path-bg)' };
+  if (b.includes('benign')) return { fg: 'var(--benign)', bg: 'var(--benign-bg)' };
+  return { fg: 'var(--thread-d)', bg: 'var(--vus-bg)' };
+}
+function dirChip(dir: string) {
+  if (dir === 'escalation') return { label: 'ESCALATION', fg: 'var(--path-d)', bg: 'var(--path-bg)', edge: 'var(--path)' };
+  if (dir === 'downgrade') return { label: 'DOWNGRADE', fg: 'var(--benign)', bg: 'var(--benign-bg)', edge: 'var(--benign)' };
+  if (dir === 'unchanged') return { label: 'STABLE', fg: 'var(--faint)', bg: 'var(--paper-2)', edge: 'var(--line-2)' };
+  return { label: dir.toUpperCase(), fg: 'var(--muted)', bg: 'var(--paper-2)', edge: 'var(--line-2)' };
+}
+function yearsSince(date: string | null): number | null {
+  if (!date) return null;
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return null;
+  return Math.max(0, Math.round((Date.now() - d.getTime()) / (365.25 * 864e5)));
+}
+
+const card: React.CSSProperties = {
+  background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14,
+  padding: '1.1rem 1.2rem', boxShadow: 'var(--sh-sm)',
+};
+const mono = (s: React.CSSProperties = {}): React.CSSProperties => ({ fontFamily: 'var(--mono)', ...s });
+const tag = (fg: string, bg: string): React.CSSProperties => ({
+  display: 'inline-block', fontFamily: 'var(--mono)', fontSize: '.68rem', fontWeight: 600,
+  padding: '.14rem .5rem', borderRadius: 6, color: fg, background: bg, letterSpacing: '.04em',
+});
+const eyebrow: React.CSSProperties = {
+  fontFamily: 'var(--mono)', fontSize: '.66rem', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--faint)',
+};
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export default function AppDashboard() {
-  const [year, setYear] = useState(2019);
-  const [syncing, setSyncing] = useState(false);
-  const [viewFhir, setViewFhir] = useState(false);
-  const [backend, setBackend] = useState<'checking' | 'online' | 'offline'>('checking');
-  const [watch, setWatch] = useState<WatchResult | null>(null);
+  const [cohort, setCohort] = useState<CohortRow[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [feeds, setFeeds] = useState<Feed[] | null>(null);
+  const [resyncing, setResyncing] = useState<string | null>(null);
+  const [sel, setSel] = useState<CohortRow | null>(null);
 
-  const stage = stageFor(year);
-  const fired = stage === 'fire' || stage === 'closed';
-  const pct = ((year - 2019) / 7) * 100;
+  const [nodes, setNodes] = useState<Record<Agent, NodeState>>({
+    Watcher: 'idle', Adjudicator: 'idle', Planner: 'idle', Cascade: 'idle', Steward: 'idle',
+  });
+  const [running, setRunning] = useState(false);
+  const [view, setView] = useState<View>('watchlist');
+  const [log, setLog] = useState<LogLine[]>([]);
+  const [adj, setAdj] = useState<Adjudication | null>(null);
+  const [plan, setPlan] = useState<ResolutionPlan | null>(null);
+  const [casc, setCasc] = useState<CascadeResult | null>(null);
+  const [stew, setStew] = useState<StewardResult | null>(null);
+  const [struc, setStruc] = useState<Structural | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
-  // Ping the backend on mount so the UI reflects a real connection.
   useEffect(() => {
-    getHealth().then(() => setBackend('online')).catch(() => setBackend('offline'));
+    getCohort().then(setCohort).catch((e) => setErr(String(e.message || e)));
+    getFreshness().then(setFeeds).catch(() => setFeeds([]));
   }, []);
+  useEffect(() => { logRef.current?.scrollTo({ top: 1e6 }); }, [log]);
 
-  const onYear = (v: number) => {
-    setYear(v);
-    setSyncing(true);
-    // Real round-trip to the backend; the local demo still works if it is offline.
-    runWatch(v)
-      .then(res => { setWatch(res); setBackend('online'); })
-      .catch(() => setBackend('offline'))
-      .finally(() => window.setTimeout(() => setSyncing(false), 400));
-  };
+  const push = (agent: string, text: string, tone: LogLine['tone'] = 'info') =>
+    setLog((l) => [...l, { agent, text, tone }]);
+  const setNode = (a: Agent, s: NodeState) => setNodes((n) => ({ ...n, [a]: s }));
+
+  function selectPatient(r: CohortRow) {
+    setSel(r);
+    setNodes({ Watcher: 'idle', Adjudicator: 'idle', Planner: 'idle', Cascade: 'idle', Steward: 'idle' });
+    setAdj(null); setPlan(null); setCasc(null); setStew(null); setStruc(null); setLog([]);
+  }
+
+  async function doResync(f: Feed) {
+    setResyncing(f.schema);
+    push('Fivetran', `triggering targeted re-sync of ${f.schema} via MCP...`, 'info');
+    try {
+      await resync(f.connection_id);
+      push('Fivetran', `${f.schema} re-sync queued`, 'ok');
+      setFeeds(await getFreshness());
+    } catch (e) {
+      push('Fivetran', `re-sync failed: ${e}`, 'warn');
+    } finally {
+      setResyncing(null);
+    }
+  }
+
+  async function runWatch(target?: CohortRow) {
+    const r = target ?? sel;
+    if (!r || running) return;
+    setRunning(true);
+    setAdj(null); setPlan(null); setCasc(null); setStew(null); setLog([]);
+
+    setNode('Watcher', 'running');
+    await sleep(350);
+    push('Watcher', `${r.gene} ${r.hgvs_c}: registry "${r.recorded_class}" vs ClinVar "${r.current_class}" (${r.review_stars}★) — ${r.direction}`, 'ok');
+    setNode('Watcher', 'done');
+
+    setNode('Adjudicator', 'running');
+    push('Adjudicator', `cited ledger built, posterior ${r.posterior.toFixed(2)} (${r.band}); weighing the ${r.review_stars}★ review...`, 'info');
+    let a: Adjudication | null = null;
+    try {
+      a = await adjudicate(r.patient_id);
+      setAdj(a);
+      const v = a.verdict!;
+      push('Adjudicator', `verdict: ${v.triage} · ${v.action}${v.withheld ? ' · WITHHELD' : ''}`, v.withheld ? 'warn' : 'ok');
+      setNode('Adjudicator', 'done');
+    } catch (e) {
+      push('Adjudicator', `error: ${e}`, 'warn'); setNode('Adjudicator', 'held'); setRunning(false); return;
+    }
+
+    setNode('Planner', 'running');
+    push('Planner', 'ranking next experiments by information value...', 'info');
+    try {
+      const p = await getPlan(r.patient_id); setPlan(p);
+      push('Planner', p.recommendation || 'no resolving experiment found', 'ok');
+    } catch (e) { push('Planner', `error: ${e}`, 'warn'); }
+    setNode('Planner', 'done');
+
+    const actionable = a?.verdict?.action === 'draft_recontact' && !a?.verdict?.withheld;
+    if (actionable) {
+      setNode('Cascade', 'running');
+      push('Cascade', 'matching carriers + at-risk relatives, drafting recontact...', 'info');
+      try {
+        const c = await getCascade(r.patient_id); setCasc(c);
+        push('Cascade', `drafted ${c.drafts.length} FHIR proposals for ${c.carriers} carrier(s) + ${c.relatives} relative(s)`, 'ok');
+      } catch (e) { push('Cascade', `error: ${e}`, 'warn'); }
+      setNode('Cascade', 'done');
+    } else {
+      setNode('Cascade', 'held');
+      push('Cascade', 'held — verdict not actionable, no family recontact drafted', 'warn');
+    }
+
+    setNode('Steward', 'running');
+    try {
+      const s = await getSteward(r.patient_id); setStew(s);
+      if (s.has_deceased_carrier) push('Steward', 'deceased carrier — routed to ethics / next-of-kin pathway', 'warn');
+      else push('Steward', 'drafted ClinVar give-back submission', 'ok');
+    } catch (e) { push('Steward', `error: ${e}`, 'warn'); }
+    setNode('Steward', 'done');
+
+    if (r.hgvs_p) getStructural(r.gene, r.hgvs_p).then(setStruc).catch(() => {});
+    setRunning(false);
+  }
+
+  // deep link: /app?patient=<id>&run=1 selects a case and optionally runs the loop
+  useEffect(() => {
+    if (!cohort) return;
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get('view');
+    if (v && ['watchlist', 'pedigree', 'graph', 'add'].includes(v)) setView(v as View);
+    const pid = params.get('patient');
+    if (!pid) return;
+    const row = cohort.find((r) => r.patient_id === pid);
+    if (!row) return;
+    selectPatient(row);
+    if (params.get('run') === '1' && row.reclassified) setTimeout(() => runWatch(row), 400);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cohort]);
+
+  const flagged = cohort?.filter((r) => r.reclassified) ?? [];
+  const escalations = flagged.filter((r) => r.direction === 'escalation');
+  const maxSilent = Math.max(0, ...(cohort ?? []).map((r) => yearsSince(r.recorded_date) ?? 0));
+  const pid = sel?.patient_id ?? 'diane-marchetti';
+  const refreshCohort = () => getCohort().then(setCohort).catch(() => {});
 
   return (
-    <div className="fade-in" style={{ padding: '2.5rem 0 4rem' }}>
-      <div className="container">
-        {/* header */}
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.8rem' }}>
-          <div>
-            <div className="mono-tag"><span className="dash" /> Live simulator</div>
-            <h1 className="display" style={{ fontSize: 'clamp(1.9rem,1rem+2.5vw,2.6rem)', margin: '.7rem 0 .4rem' }}>Evidence watch, a time machine</h1>
-            <p style={{ color: 'var(--muted)' }}>Drag the year. Watch the evidence change, the agent reason, and the loop close.</p>
-          </div>
-          <div style={{ display: 'flex', gap: '.6rem', flexWrap: 'wrap' }}>
-            <div className="pill">
-              <Database size={15} color="var(--thread)" />
-              <span className="mono" style={{ fontWeight: 600, color: 'var(--ink)' }}>FIVETRAN: {syncing ? 'SYNCING' : 'IDLE'}</span>
-              <span className={syncing ? 'pulsing' : ''} style={{ width: 8, height: 8, borderRadius: 9, background: syncing ? 'var(--thread)' : 'var(--line-2)' }} />
-            </div>
-            <div className="pill" title={watch ? `backend decision: ${watch.decision}` : undefined}>
-              <span className="mono" style={{ fontWeight: 600, color: 'var(--ink)' }}>
-                API: {backend === 'checking' ? '…' : backend === 'online' ? 'CONNECTED' : 'OFFLINE'}
-              </span>
-              <span style={{ width: 8, height: 8, borderRadius: 9, background: backend === 'online' ? 'var(--benign, #1a7f5a)' : backend === 'offline' ? 'var(--path-d, #c0392b)' : 'var(--line-2)' }} />
-            </div>
-          </div>
-        </header>
+    <main style={{ maxWidth: 1320, margin: '0 auto', padding: '1.4rem 1.6rem 4rem' }}>
+      <style>{`
+        @keyframes uvpulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }
+        @keyframes uvspin { to { transform: rotate(360deg) } }
+        @keyframes uvfade { from { opacity:0; transform: translateY(4px) } to { opacity:1; transform:none } }
+        .uv-row { transition: box-shadow .15s ease, background .15s ease; }
+        .uv-row:hover { background: var(--paper-2) !important; box-shadow: var(--sh-sm); }
+        .uv-log > div { animation: uvfade .25s ease both; }
+      `}</style>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 380px', gap: '1.5rem', alignItems: 'start' }} className="grid-2">
-          {/* LEFT */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {/* time machine */}
-            <div className="card" style={{ padding: '1.6rem 1.8rem' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '.9rem', marginBottom: '.2rem' }}>
-                <Clock size={18} color="var(--thread)" />
-                <span style={{ fontFamily: 'var(--serif)', fontSize: '2rem', fontWeight: 600 }}>{year}</span>
-                <span style={{ fontSize: '.9rem', color: 'var(--muted)' }}>{narration[stage]}</span>
-              </div>
-              <input
-                type="range" className="thread-range" min={2019} max={2026} step={1} value={year}
-                onChange={e => onYear(Number(e.target.value))}
-                style={{ ['--p' as string]: `${pct}%`, marginTop: '1rem' }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.72rem', color: 'var(--faint)', marginTop: '.5rem' }}>
-                <span>2019</span><span>2021</span><span>2023</span><span>2025</span>
-              </div>
-            </div>
-
-            {/* patient + variant */}
-            <div className="card" style={{ padding: '1.8rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: '1.3rem', marginBottom: '1.3rem', borderBottom: '1px solid var(--line)' }}>
-                <div>
-                  <div style={{ fontSize: '.72rem', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--blue)', marginBottom: '.4rem' }}>FHIR R4 · Patient registry</div>
-                  <h3 style={{ fontSize: '1.4rem' }}>Diane M. · 44</h3>
-                  <p style={{ color: 'var(--muted)', fontSize: '.95rem' }}>Colorectal cancer (resection, 2019) · pedigree: daughter 22, sister 49</p>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div className="mono" style={{ fontSize: '.7rem', color: 'var(--faint)' }}>LAST ENCOUNTER</div>
-                  <div style={{ fontWeight: 600 }}>Oct 2019</div>
-                </div>
-              </div>
-
-              <div style={{ background: 'var(--paper)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '1.3rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '.7rem', flexWrap: 'wrap' }}>
-                  <span className="mono" style={{ fontSize: '1.05rem', fontWeight: 600 }}>MLH1 c.1852_1854del</span>
-                  <span className={`badge ${fired ? 'badge-path' : 'badge-vus'}`}>{fired ? 'Likely pathogenic' : 'VUS'}</span>
-                </div>
-                <div style={{ fontSize: '.82rem', color: 'var(--muted)', marginBottom: '1rem' }} className="mono">
-                  ClinVar VCV000123456 · review status: {stage === 'baseline' ? '1★ single submitter' : stage === 'withhold' ? '1★ + 1 conflicting submission' : '3★ ClinGen expert panel'}
-                </div>
-
-                {/* adjudication note */}
-                {stage === 'withhold' ? (
-                  <NoteBox tone="amber" label="Adjudicator · withheld">
-                    A single low-confidence submission does not change management. Unravel holds, no alert fired.
-                    <span style={{ color: 'var(--faint)' }}> This is the moment a rules engine would get wrong.</span>
-                  </NoteBox>
-                ) : fired ? (
-                  <NoteBox tone="red" label="Adjudicator · actionable">
-                    Reclassified by ClinGen expert panel. Consistent with Lynch syndrome, changes surveillance.
-                    Cascade testing indicated for first-degree relatives.
-                  </NoteBox>
-                ) : (
-                  <NoteBox tone="muted" label="Adjudicator · monitoring">
-                    Variant of Uncertain Significance. Standard surveillance; no change to clinical management.
-                  </NoteBox>
-                )}
-              </div>
-
-              {/* family board */}
-              <AnimatePresence>
-                {fired && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden' }}>
-                    <div style={{ marginTop: '1.3rem' }}>
-                      <div style={{ fontSize: '.72rem', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--path-d)', marginBottom: '.6rem' }}>
-                        Affected-family board · 2 relatives flagged
-                      </div>
-                      <FamilyRow name="Diane M. · 44" tag="proband" />
-                      <FamilyRow name="Daughter · 22" tag="1st-degree · at-risk" hot />
-                      <FamilyRow name="Sister · 49" tag="1st-degree · at-risk" hot last />
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-
-          {/* RIGHT */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <AnimatePresence>
-              {fired && (
-                <motion.div initial={{ opacity: 0, scale: .96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: .96 }}
-                  className="card" style={{ padding: '1.6rem', border: '1px solid #f0b8bd', background: 'linear-gradient(180deg,#ffffff,#fbe9ea)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', color: 'var(--path-d)', marginBottom: '.9rem' }}>
-                    <ShieldAlert size={18} />
-                    <span style={{ fontSize: '.74rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>Loop closure · draft</span>
-                  </div>
-                  <h3 style={{ fontSize: '1.25rem', marginBottom: '.5rem' }}>Recontact fan-out prepared</h3>
-                  <p style={{ fontSize: '.9rem', color: 'var(--muted)', marginBottom: '1.1rem', lineHeight: 1.55 }}>
-                    Drafted for the ordering clinician and each at-risk relative, never sent autonomously.
-                  </p>
-
-                  <div className="console" style={{ marginBottom: '1rem', background: '#fff', borderColor: '#f0c2c6' }}>
-                    <Target name="Dr. Sarah Chen" role="Ordering MD" />
-                    <Target name="Daughter, 22" role="1st-degree" hot />
-                    <Target name="Sister, 49" role="1st-degree" hot last />
-                  </div>
-
-                  <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setViewFhir(v => !v)}>
-                    <Share2 size={16} /> {viewFhir ? 'Hide FHIR draft' : 'View FHIR draft'}
-                  </button>
-
-                  <AnimatePresence>
-                    {viewFhir && (
-                      <motion.pre initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                        className="code" style={{ marginTop: '.9rem' }}>{`{
-  "resourceType": "Task",
-  "intent": "proposal",
-  "status": "draft",
-  "code": "patient-recontact / cascade-testing",
-  "for": { "reference": "Patient/diane-o" },
-  "reasonCode": "MLH1 VUS -> Likely Pathogenic (ClinGen 3*)",
-  "owner": { "reference": "Practitioner/genetics-counsellor" }
-}`}</motion.pre>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* agent log */}
-            <div className="card" style={{ padding: '1.5rem', flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: '1.1rem' }}>
-                <FileText size={18} color="var(--muted)" />
-                <span style={{ fontWeight: 700, fontFamily: 'var(--serif)', fontSize: '1.1rem' }}>Agent log</span>
-              </div>
-              <div className="console">
-                {logFor(stage).map((l, i) => (
-                  <div key={i} className="log-line" style={{ color: l.c, marginBottom: '.55rem' }}>{l.t}</div>
-                ))}
-              </div>
-            </div>
+      {/* header + source rail */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+        <div>
+          <div style={eyebrow}>Variant commons watch</div>
+          <h1 style={{ fontSize: '1.7rem', margin: '.15rem 0' }}>MLH1 / Lynch surveillance</h1>
+          <div style={{ fontSize: '.82rem', color: 'var(--muted)' }}>
+            Live engine: evidence from BigQuery, verdicts from Gemini 3.1 Pro, structure from AlphaFold. Synthetic cohort.
           </div>
         </div>
+        <div style={{ ...card, padding: '.7rem .8rem', minWidth: 330 }}>
+          <div style={{ ...eyebrow, marginBottom: '.45rem' }}>Evidence sources</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.4rem' }}>
+            {(feeds ?? []).map((f) => (
+              <SourceChip key={f.schema} label={f.schema} fresh={!f.is_stale}
+                sub={f.hours_old != null ? `${f.hours_old}h` : '?'}
+                busy={resyncing === f.schema} onClick={() => doResync(f)} />
+            ))}
+            {!feeds && <span style={{ ...mono({ fontSize: '.7rem' }), color: 'var(--faint)' }}>checking Fivetran via MCP...</span>}
+            <SourceChip label="alphafold" fresh sub="db" />
+            <SourceChip label="gemini" fresh sub="3.1pro" />
+          </div>
+          <div style={{ ...mono({ fontSize: '.62rem' }), color: 'var(--faint)', marginTop: '.45rem' }}>
+            click a Fivetran source to trigger a targeted re-sync
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '1rem', marginTop: '1.1rem', alignItems: 'flex-start' }}>
+        <NavRail view={view} setView={setView} />
+        <div style={{ flex: 1, minWidth: 0, display: 'grid', gap: '1rem' }}>
+          {err && <div style={{ ...card, ...tag('var(--path-d)', 'var(--path-bg)'), whiteSpace: 'normal' }}>Backend error: {err}. Is the API running on :8000?</div>}
+
+          {view === 'pedigree' && cohort && <PedigreeView patientId={pid} cohort={cohort} />}
+          {view === 'graph' && <GraphView patientId={pid} />}
+          {view === 'add' && cohort && <AddPatientView cohort={cohort} onAdded={refreshCohort} />}
+
+          {view === 'watchlist' && (<>
+          {/* impact strip */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: '.8rem' }}>
+            <Metric n={cohort ? `${flagged.length}` : '…'} label="variants reclassified" />
+            <Metric n={`${escalations.length}`} label="escalations to act on" tone="path" />
+            <Metric n={`${maxSilent}`} label="years silent (max)" tone="path" />
+            <Metric n={feeds ? `${feeds.filter((f) => !f.is_stale).length}/${feeds.length}` : '…'} label="Fivetran feeds fresh" tone="benign" />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,340px) minmax(0,1fr)', gap: '1.1rem', alignItems: 'start' }}>
+        {/* worklist */}
+        <div style={{ ...card, padding: '.9rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <div style={eyebrow}>Watchlist · ranked by urgency</div>
+            <span style={{ ...mono({ fontSize: '.66rem' }), color: 'var(--faint)' }}>{cohort?.length ?? 0} cases</span>
+          </div>
+          <div style={{ display: 'grid', gap: '.4rem', marginTop: '.6rem' }}>
+            {!cohort && <div style={{ color: 'var(--faint)', fontSize: '.85rem' }}>loading cohort from BigQuery...</div>}
+            {cohort?.map((r) => {
+              const bc = bandColor(r.band); const dc = dirChip(r.direction);
+              const isSel = sel?.patient_id === r.patient_id;
+              const silent = yearsSince(r.recorded_date);
+              return (
+                <div key={r.patient_id} className="uv-row" onClick={() => selectPatient(r)}
+                  style={{
+                    cursor: 'pointer', borderRadius: 10, padding: '.55rem .6rem',
+                    border: '1px solid var(--line)',
+                    background: 'var(--surface)',
+                    boxShadow: isSel ? 'inset 0 0 0 1.5px var(--ink)' : 'none',
+                  }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.4rem', alignItems: 'baseline' }}>
+                    <span style={{ fontWeight: 700, fontSize: '.88rem' }}>{r.patient_name}{r.deceased ? ' †' : ''}</span>
+                    <span style={tag(dc.fg, dc.bg)}>{dc.label}</span>
+                  </div>
+                  <div style={{ ...mono({ fontSize: '.7rem' }), color: 'var(--muted)', marginTop: '.15rem' }}>
+                    {r.gene} {r.hgvs_c} · {r.review_stars}★
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginTop: '.35rem' }}>
+                    <Gauge p={r.posterior} />
+                    <span style={mono({ fontSize: '.72rem', color: bc.fg, fontWeight: 600 })}>{r.posterior.toFixed(2)}</span>
+                  </div>
+                  {silent != null && r.reclassified && (
+                    <div style={{ ...mono({ fontSize: '.64rem' }), color: silent >= 3 ? 'var(--path-d)' : 'var(--faint)', marginTop: '.2rem' }}>
+                      silent {silent} yr{silent === 1 ? '' : 's'}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* case workup */}
+        <div style={{ display: 'grid', gap: '1rem' }}>
+          {!sel && <div style={{ ...card, color: 'var(--faint)' }}>Select a case from the watchlist to open the workup and run the agent loop.</div>}
+
+          {sel && (
+            <>
+              <div style={card}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '.6rem' }}>
+                  <div>
+                    <h2 style={{ fontSize: '1.25rem' }}>{sel.patient_name}{sel.deceased ? ' †' : ''}</h2>
+                    <div style={mono({ fontSize: '.76rem', color: 'var(--muted)', marginTop: '.15rem' })}>
+                      {sel.gene} {sel.hgvs_c}{sel.hgvs_p ? ` (${sel.hgvs_p})` : ''}
+                    </div>
+                    <div style={{ fontSize: '.8rem', color: 'var(--muted)', marginTop: '.3rem' }}>
+                      registry: <b>{sel.recorded_class}</b> → ClinVar now: <b style={{ color: bandColor(sel.current_class || '').fg }}>{sel.current_class}</b> ({sel.review_stars}★)
+                    </div>
+                  </div>
+                  <button onClick={() => runWatch()} disabled={running || !sel.reclassified}
+                    style={{
+                      background: sel.reclassified ? 'var(--thread)' : 'var(--line-2)', color: '#fff', fontWeight: 700,
+                      borderRadius: 9, padding: '.6rem 1.1rem', fontSize: '.85rem', opacity: running ? .7 : 1,
+                      cursor: sel.reclassified ? 'pointer' : 'default',
+                    }}>
+                    {running ? 'Running loop…' : sel.reclassified ? '▶ Run watch loop' : 'no change to act on'}
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '.25rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+                  {AGENTS.map((a, i) => (
+                    <div key={a} style={{ display: 'flex', alignItems: 'center' }}>
+                      <PipelineNode name={a} state={nodes[a]} />
+                      {i < AGENTS.length - 1 && <span style={{ color: 'var(--line-2)', margin: '0 .05rem' }}>→</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* posterior + ledger */}
+              <div style={card}>
+                <div style={eyebrow}>Calibrated posterior · point-based ACMG</div>
+                <div style={{ display: 'flex', gap: '1.4rem', alignItems: 'center', marginTop: '.6rem', flexWrap: 'wrap' }}>
+                  <BigGauge p={sel.posterior} />
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <div style={{ display: 'flex', gap: '.5rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                      <span style={{ fontFamily: 'var(--serif)', fontSize: '2.2rem', color: bandColor(sel.band).fg }}>{sel.posterior.toFixed(2)}</span>
+                      <span style={tag(bandColor(sel.band).fg, bandColor(sel.band).bg)}>{sel.band}</span>
+                      <span style={mono({ fontSize: '.72rem', color: 'var(--faint)' })}>{sel.points} pts · gap {sel.points_to_actionable}</span>
+                    </div>
+                    <div style={{ marginTop: '.5rem' }}>
+                      {sel.cited.length === 0 && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no molecular criteria met</div>}
+                      {sel.cited.map((c, i) => (
+                        <div key={i} style={mono({ fontSize: '.74rem', color: 'var(--muted)', padding: '.08rem 0' })}>{c}</div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {adj?.verdict && (
+                <OutCard title="Adjudicator verdict · Gemini 3.1 Pro" edge={adj.verdict.withheld ? 'var(--path)' : 'var(--thread)'}>
+                  <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginBottom: '.5rem' }}>
+                    <span style={tag(adj.verdict.triage === 'actionable' ? 'var(--path-d)' : 'var(--thread-d)', adj.verdict.triage === 'actionable' ? 'var(--path-bg)' : 'var(--vus-bg)')}>triage: {adj.verdict.triage}</span>
+                    <span style={tag('var(--ink)', 'var(--paper-2)')}>action: {adj.verdict.action}</span>
+                    <span style={tag(adj.verdict.withheld ? 'var(--path-d)' : 'var(--benign)', adj.verdict.withheld ? 'var(--path-bg)' : 'var(--benign-bg)')}>{adj.verdict.withheld ? 'withheld' : 'not withheld'}</span>
+                  </div>
+                  <p style={{ fontSize: '.88rem', lineHeight: 1.55 }}>{adj.verdict.rationale}</p>
+                </OutCard>
+              )}
+
+              {plan && (
+                <OutCard title="Resolution Planner · next best evidence" edge="var(--conflict)">
+                  <p style={{ fontSize: '.88rem', marginBottom: '.5rem' }}>{plan.recommendation}</p>
+                  {plan.steps.slice(0, 4).map((s) => (
+                    <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: '.5rem', fontSize: '.76rem', padding: '.2rem 0', borderTop: '1px solid var(--line)' }}>
+                      <span style={{ flex: 1 }}>{s.label} <span style={mono({ color: 'var(--faint)' })}>({s.code} {s.strength})</span></span>
+                      <span style={mono({ color: s.crosses_actionable ? 'var(--path-d)' : 'var(--muted)' })}>→ {s.projected_posterior.toFixed(2)}</span>
+                      {s.crosses_actionable && <span style={tag('var(--path-d)', 'var(--path-bg)')}>crosses</span>}
+                    </div>
+                  ))}
+                </OutCard>
+              )}
+
+              {casc && (
+                <OutCard title="Cascade Coordinator · draft recontact" edge="var(--path)">
+                  <div style={{ fontSize: '.88rem', marginBottom: '.4rem' }}>
+                    <b>{casc.drafts.length}</b> draft FHIR proposals · {casc.carriers} carrier(s) + {casc.relatives} at-risk relative(s)
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.35rem' }}>
+                    {casc.drafts.map((d) => (
+                      <span key={d.patient_id} style={tag('var(--thread-d)', 'var(--vus-bg)')}>{d.for} · {d.relationship}</span>
+                    ))}
+                  </div>
+                  <div style={{ ...mono({ fontSize: '.64rem' }), color: 'var(--faint)', marginTop: '.5rem' }}>{casc.note}</div>
+                </OutCard>
+              )}
+
+              {stew && (stew.has_deceased_carrier || stew.give_back) && (
+                <OutCard title="Steward · ethics + give-back" edge="var(--benign)">
+                  {stew.ethics_routes.map((e) => (
+                    <div key={e.deceased} style={{ fontSize: '.85rem', marginBottom: '.4rem' }}>
+                      <b>{e.deceased}</b> (deceased) → {e.route}. Living relatives: {e.living_relatives.join(', ') || 'none on file'}.
+                    </div>
+                  ))}
+                  <div style={{ fontSize: '.82rem', color: 'var(--muted)' }}>
+                    Draft ClinVar give-back: {stew.give_back.variant} → <b>{stew.give_back.submitted_classification}</b> (draft-only)
+                  </div>
+                </OutCard>
+              )}
+
+              {struc && (
+                <OutCard title="Structural story · AlphaFold + AlphaMissense" edge="var(--thread-d)">
+                  <p style={{ fontSize: '.86rem', marginBottom: '.5rem' }}>{struc.summary}</p>
+                  <div style={{ display: 'flex', gap: '1.4rem', flexWrap: 'wrap' }}>
+                    <Stat n={`${struc.enrichment}×`} label="enrichment" tone="path" />
+                    <Stat n={struc.variant_mean_am.toFixed(2)} label="residue AM" />
+                    <Stat n={`${struc.variant_plddt}`} label="pLDDT" />
+                  </div>
+                  <a href={struc.structure_page} target="_blank" rel="noreferrer" style={{ fontSize: '.82rem', fontWeight: 600, display: 'inline-block', marginTop: '.5rem' }}>
+                    View AlphaFold model ({struc.uniprot}) →
+                  </a>
+                </OutCard>
+              )}
+
+              {/* activity log */}
+              <div style={{ ...card, background: '#11141f', border: '1px solid #20263a' }}>
+                <div style={{ ...eyebrow, color: '#7f8aa3' }}>Agent activity log</div>
+                <div ref={logRef} className="uv-log" style={{ maxHeight: 200, overflowY: 'auto', marginTop: '.5rem' }}>
+                  {log.length === 0 && <div style={mono({ fontSize: '.76rem', color: '#5b647a' })}>idle — run the watch loop</div>}
+                  {log.map((l, i) => (
+                    <div key={i} style={mono({ fontSize: '.74rem', padding: '.12rem 0', color: l.tone === 'warn' ? '#e8b06a' : l.tone === 'ok' ? '#7fd1a3' : '#aeb6c8' })}>
+                      <span style={{ color: '#5b647a' }}>[{l.agent}]</span> {l.text}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+          </>)}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function NavRail({ view, setView }: { view: View; setView: (v: View) => void }) {
+  return (
+    <div style={{ ...card, padding: '.5rem', display: 'flex', flexDirection: 'column', gap: '.2rem', width: 150, flex: '0 0 auto', position: 'sticky', top: 12 }}>
+      {NAV.map((n) => {
+        const on = view === n.id;
+        const Icon = n.icon;
+        return (
+          <button key={n.id} onClick={() => setView(n.id)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '.5rem', padding: '.5rem .6rem', borderRadius: 8,
+              background: on ? 'var(--vus-bg)' : 'transparent', color: on ? 'var(--thread-d)' : 'var(--muted)',
+              fontWeight: on ? 700 : 600, fontSize: '.82rem', cursor: 'pointer', textAlign: 'left', width: '100%',
+            }}>
+            <Icon size={15} /> {n.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SourceChip({ label, fresh, sub, busy, onClick }: { label: string; fresh: boolean; sub: string; busy?: boolean; onClick?: () => void }) {
+  const Icon = SOURCE_ICON[label] ?? Database;
+  return (
+    <button onClick={onClick} disabled={!onClick || busy}
+      style={{ display: 'flex', alignItems: 'center', gap: '.35rem', border: '1px solid var(--line)', background: 'var(--paper)', borderRadius: 999, padding: '.25rem .55rem', cursor: onClick ? 'pointer' : 'default' }}>
+      <Icon size={13} color="var(--muted)" style={{ animation: busy ? 'uvspin 1s linear infinite' : 'none' }} />
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: fresh ? 'var(--benign)' : 'var(--path)', animation: fresh && !busy ? 'uvpulse 2.2s ease-in-out infinite' : 'none' }} />
+      <span style={mono({ fontSize: '.68rem', fontWeight: 600, color: 'var(--ink)' })}>{label}</span>
+      <span style={mono({ fontSize: '.62rem', color: 'var(--faint)' })}>{busy ? 'syncing' : sub}</span>
+    </button>
+  );
+}
+
+function Metric({ n, label, tone }: { n: string; label: string; tone?: 'path' | 'benign' }) {
+  const col = tone === 'path' ? 'var(--path-d)' : tone === 'benign' ? 'var(--benign)' : 'var(--thread-d)';
+  return (
+    <div style={{ ...card, padding: '.7rem .9rem' }}>
+      <div style={{ fontFamily: 'var(--serif)', fontSize: '1.7rem', color: col, lineHeight: 1 }}>{n}</div>
+      <div style={{ fontSize: '.72rem', color: 'var(--muted)', marginTop: '.2rem' }}>{label}</div>
+    </div>
+  );
+}
+
+function Stat({ n, label, tone }: { n: string; label: string; tone?: 'path' }) {
+  return (
+    <div>
+      <div style={{ fontFamily: 'var(--serif)', fontSize: '1.4rem', color: tone === 'path' ? 'var(--path-d)' : 'var(--ink)' }}>{n}</div>
+      <div style={mono({ fontSize: '.64rem', color: 'var(--faint)' })}>{label}</div>
+    </div>
+  );
+}
+
+function Gauge({ p }: { p: number }) {
+  return (
+    <span style={{ position: 'relative', flex: 1, height: 7, borderRadius: 999, background: 'linear-gradient(90deg,var(--benign),#d7c98f 40%,#e7b06a 56%,var(--path))' }}>
+      <span style={{ position: 'absolute', top: -2, left: '90%', width: 1.5, height: 11, background: 'rgba(23,26,43,.3)' }} />
+      <span style={{ position: 'absolute', top: -2.5, left: `calc(${p * 100}% - 1px)`, width: 2.5, height: 12, background: 'var(--ink)', borderRadius: 2, transition: 'left .8s cubic-bezier(.2,.8,.2,1)' }} />
+    </span>
+  );
+}
+
+function BigGauge({ p }: { p: number }) {
+  const [w, setW] = useState(0);
+  useEffect(() => { const t = setTimeout(() => setW(p), 60); return () => clearTimeout(t); }, [p]);
+  return (
+    <div style={{ width: 150 }}>
+      <div style={{ position: 'relative', height: 14, borderRadius: 999, background: 'linear-gradient(90deg,var(--benign),#d7c98f 40%,#e7b06a 56%,var(--path))' }}>
+        <div style={{ position: 'absolute', top: -4, left: '90%', width: 2, height: 22, background: 'rgba(23,26,43,.35)' }} />
+        <div style={{ position: 'absolute', top: -5, left: `calc(${w * 100}% - 1.5px)`, width: 3, height: 24, background: 'var(--ink)', borderRadius: 2, transition: 'left 1s cubic-bezier(.2,.8,.2,1)' }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '.3rem' }}>
+        <span style={mono({ fontSize: '.6rem', color: 'var(--faint)' })}>benign</span>
+        <span style={mono({ fontSize: '.6rem', color: 'var(--faint)' })}>0.90</span>
+        <span style={mono({ fontSize: '.6rem', color: 'var(--faint)' })}>path</span>
       </div>
     </div>
   );
 }
 
-/* ---- helpers ---- */
-
-function NoteBox({ tone, label, children }: { tone: 'amber' | 'red' | 'muted'; label: string; children: ReactNode }) {
+function PipelineNode({ name, state }: { name: Agent; state: NodeState }) {
+  const Icon = AGENT_ICON[name];
   const map = {
-    amber: { bg: 'var(--vus-bg)', bd: '#ecd29a', fg: 'var(--vus)' },
-    red: { bg: 'var(--path-bg)', bd: '#f0b8bd', fg: 'var(--path-d)' },
-    muted: { bg: '#fff', bd: 'var(--line)', fg: 'var(--muted)' },
-  }[tone];
+    idle: { bg: 'var(--paper-2)', fg: 'var(--faint)' },
+    running: { bg: 'var(--vus-bg)', fg: 'var(--thread-d)' },
+    done: { bg: 'var(--benign-bg)', fg: 'var(--benign)' },
+    held: { bg: '#fdf1d9', fg: '#8a6300' },
+  }[state];
   return (
-    <div style={{ background: map.bg, border: `1px solid ${map.bd}`, borderRadius: 'var(--r-sm)', padding: '.9rem 1rem' }}>
-      <div style={{ fontSize: '.68rem', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: map.fg, marginBottom: '.35rem' }}>{label}</div>
-      <div style={{ fontSize: '.9rem', color: 'var(--ink)', lineHeight: 1.55 }}>{children}</div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '.3rem', background: map.bg, border: '1px solid var(--line)', borderRadius: 8, padding: '.32rem .5rem' }}>
+      <Icon size={13} color={map.fg} style={{ animation: state === 'running' ? 'uvpulse 1s ease-in-out infinite' : 'none' }} />
+      <span style={mono({ fontSize: '.68rem', fontWeight: 600, color: map.fg })}>
+        {name}{state === 'done' ? ' ✓' : state === 'held' ? ' ⏸' : state === 'running' ? '…' : ''}
+      </span>
     </div>
   );
 }
 
-function FamilyRow({ name, tag, hot, last }: { name: string; tag: string; hot?: boolean; last?: boolean }) {
+function OutCard({ title, edge, children }: { title: string; edge: string; children: ReactNode }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '.6rem .9rem', marginBottom: last ? 0 : '.5rem',
-      background: hot ? 'var(--path-soft)' : 'var(--paper)', border: `1px solid ${hot ? '#f0b8bd' : 'var(--line)'}`, borderRadius: 'var(--r-sm)',
-      borderLeft: `3px solid ${hot ? 'var(--path)' : 'var(--line-2)'}` }}>
-      <span style={{ fontSize: '.92rem', fontWeight: 600 }}><Dna size={13} style={{ verticalAlign: '-2px', marginRight: 6, color: hot ? 'var(--path)' : 'var(--faint)' }} />{name}</span>
-      <span className="mono" style={{ fontSize: '.72rem', fontWeight: 600, color: hot ? 'var(--path-d)' : 'var(--muted)' }}>{tag}</span>
+    <div style={{ ...card, animation: 'uvfade .3s ease both' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: edge, flex: '0 0 auto' }} />
+        <div style={eyebrow}>{title}</div>
+      </div>
+      <div style={{ marginTop: '.5rem' }}>{children}</div>
     </div>
   );
-}
-
-function Target({ name, role, hot, last }: { name: string; role: string; hot?: boolean; last?: boolean }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.88rem', padding: '.5rem 0', borderBottom: last ? 'none' : '1px solid #f0c2c6' }}>
-      <span style={{ fontWeight: 600 }}><ChevronRight size={13} style={{ verticalAlign: '-2px', color: 'var(--path)' }} /> {name}</span>
-      <span className="mono" style={{ color: hot ? 'var(--path-d)' : 'var(--muted)', fontWeight: 600 }}>{role}</span>
-    </div>
-  );
-}
-
-function logFor(stage: Stage): { t: string; c: string }[] {
-  if (stage === 'baseline') return [
-    { t: '[2019] FIVETRAN: sync complete · 0 material changes to tracked variants', c: 'var(--muted)' },
-    { t: '[2019] WATCHER: MLH1 registry entry stable · sleeping', c: 'var(--faint)' },
-  ];
-  if (stage === 'withhold') return [
-    { t: '[2021] FIVETRAN: sync complete · 1 new submission on MLH1 c.1852_1854del', c: 'var(--muted)' },
-    { t: '[2021] WATCHER: delta hit · escalating to Adjudicator', c: 'var(--ink)' },
-    { t: '[2021] ADJUDICATOR: 1★ single submitter · low confidence · review status unchanged', c: 'var(--vus)' },
-    { t: '[2021] ADJUDICATOR: WITHHOLD, not actionable · no alert fired', c: 'var(--vus)' },
-  ];
-  if (stage === 'fire') return [
-    { t: '[2023] FIVETRAN: sync complete · 1,204 ClinVar delta rows', c: 'var(--muted)' },
-    { t: '[2023] WATCHER: delta hit against FHIR registry (Patient: Diane)', c: 'var(--ink)' },
-    { t: '[2023] ADJUDICATOR: VUS → LP · ClinGen 3★ · actionability tier raised', c: 'var(--blue)' },
-    { t: '[2023] CASCADE: locating first-degree relatives in pedigree…', c: 'var(--gold)' },
-    { t: '[2023] CASCADE: drafted FHIR Task + Communication (intent: proposal)', c: 'var(--path-d)' },
-  ];
-  return [
-    { t: '[2025] STATUS: loop closed in 2023 · drafts awaiting clinician review', c: 'var(--muted)' },
-    { t: '[2025] NOTE: without Unravel, no system would have re-checked Diane', c: 'var(--path-d)' },
-  ];
 }

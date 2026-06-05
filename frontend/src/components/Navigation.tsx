@@ -30,7 +30,7 @@ export default function Navigation() {
             <span className="hide-sm">{link('/', 'Home')}</span>
             <span className="hide-sm">{link('/mission', 'Mission')}</span>
             <span className="hide-sm">{link('/technology', 'Technology')}</span>
-            <Link to="/app" className="btn btn-primary btn-sm">Open Simulator</Link>
+            <Link to="/app" className="btn btn-primary btn-sm">Open Dashboard</Link>
           </div>
         </div>
       </div>
