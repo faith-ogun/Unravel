@@ -13,7 +13,7 @@ Built for the **Google Cloud Rapid Agent Hackathon** · **Fivetran track**.
 
 - 🔗 **Live demo (no login):** _TODO_
 - 🎥 **3-minute video:** _TODO_
-- 🧬 **Powered by** Gemini 3.1 · Google ADK → Cloud Run · Fivetran MCP · FHIR R4
+- 🧬 **Powered by** Gemini 3.1 · Google ADK → Cloud Run · Fivetran MCP · BigQuery · Firestore (FHIR R4) · AlphaFold + AlphaMissense
 
 ---
 
@@ -40,25 +40,28 @@ It is **disease-agnostic**, hereditary cancer **and** rare/paediatric disease (w
 
 Unravel runs one tight loop, end to end:
 
-**evidence change → adjudication → patient match → family cascade fan-out → drafted FHIR recontact.**
+**evidence change → calibrated adjudication → next-best-evidence plan → family cascade → drafted FHIR recontact + ClinVar give-back.**
 
-1. **Watch** evolving evidence (ClinVar / ClinGen / OncoKB / CIViC), kept fresh by Fivetran.
+1. **Watch** evolving evidence (ClinVar + gnomAD + AlphaMissense), kept fresh by Fivetran in BigQuery.
 2. **Detect** a material change against the clinic's historical VUS registry (deterministic, auditable).
-3. **Adjudicate** whether the change *actually* alters management, reasoning over conflicting, citation-backed evidence, and **withholding** low-confidence flips.
-4. **Match** the affected patient *and* at-risk first-degree relatives.
-5. **Draft** the clinician alert + cascade-testing fan-out as **draft-only FHIR resources**, never sent autonomously.
+3. **Adjudicate** with a calibrated Bayesian ACMG posterior, reasoning over cited, conflicting evidence and **withholding** low-confidence flips (a 1-star conflicting assertion is not a 3-star expert panel, even at the same molecular posterior).
+4. **Plan** the single highest-yield experiment that would resolve a still-uncertain variant.
+5. **Match** the affected patient *and* at-risk first-degree relatives, and **draft** the recontact + cascade fan-out as **draft-only FHIR resources**.
+6. **Give back** a draft ClinVar submission on resolution; route deceased-proband cases to ethics, not a letter.
 
 ---
 
-## The three agents
+## The five agents
 
-Genuinely multi-agent, each operates on different data, on a different clock.
+Genuinely multi-agent (an ADK coordinator pattern), each operating on different data, on a different clock.
 
-| Agent | Data | Clock | Job |
+| Agent | Model | Clock | Job |
 |---|---|---|---|
-| **1. Watcher** (Evidence Surveillance) | Synced evidence feeds | The *evidence's* clock, wakes on a change | Deterministic, auditable delta-detection vs the VUS registry. **Fivetran is its heartbeat.** |
-| **2. Adjudicator** (Clinical Significance) | Conflicting submissions, free-text criteria, gene tier, penetrance | Fires when the Watcher flags a change | Decide whether the change alters management; weight review status; **withhold** noise. *The AI-factor moment.* |
-| **3. Cascade Coordinator** (Recontact & Fan-out) | Pedigree (FHIR `FamilyMemberHistory` / `RelatedPerson`) + care team | Fires only on a confirmed actionable upgrade | Draft the alert + family cascade fan-out as FHIR `Task` / `Communication` (`intent: proposal`). *The genomics-native "wow."* |
+| **1. Watcher** (Evidence Surveillance) | Flash-Lite | the *evidence's* clock, wakes on a change | Deterministic, auditable delta-detection vs the VUS registry. **Fivetran is its heartbeat.** |
+| **2. Adjudicator** (Clinical Significance) | 3.1 Pro | fires when the Watcher flags a change | Build the cited ACMG ledger, compute a calibrated posterior, weight review status, **withhold** low-confidence flips. *The moat.* |
+| **3. Resolution Planner** (Next-Best-Evidence) | 3.1 Pro | proactive on warm/hot variants | Rank the next experiment (segregation, tumour MMR-IHC/MSI, functional, splicing) by information value, in ACMG currency. *The never-done core.* |
+| **4. Cascade Coordinator** (Recontact & Fan-out) | 3.1 Pro | only on a confirmed actionable upgrade | Match carriers + at-risk relatives; draft FHIR `Task` / `Communication` / `RiskAssessment` (`intent: proposal`). *The genomics-native wow.* |
+| **5. Steward** (Ethics & Give-back) | 3.1 Pro | edge cases + on resolution | Route deceased-proband cases to an ethics/next-of-kin pathway (never a letter); draft a ClinVar give-back submission. |
 
 ### Why it's an agent, not a cron job
 Detecting a status flip is deterministic. **Adjudicating it is not.** ClinVar carries conflicting submissions at different review/star levels; expert panels disagree with single-submitter assertions; ontologies mismatch. Deciding whether a VUS has *actually* crossed the actionability threshold, and correctly **withholding** a flip that's only a low-confidence 1★ submission, is genuine LLM reasoning. The **rules / AI boundary** is explicit: deterministic code does the diff and gene-tier rules; the Gemini agents do the messy, contradictory, language-heavy adjudication.
@@ -70,41 +73,45 @@ Detecting a status flip is deterministic. **Adjudicating it is not.** ClinVar ca
 ```
 ══ EVIDENCE PLANE ═════════════════════════════════════════════════════════
 
-   ClinVar ┐
-   ClinGen ├──▶  FIVETRAN  ──▶  BigQuery  (evidence warehouse)
-   OncoKB  │     continuous sync
-   CIViC   ┘
+   ClinVar       ┐
+   gnomAD        ├──▶  FIVETRAN  ──▶  BigQuery  (unified evidence view)
+   AlphaMissense ┘     GCS connectors          AlphaFold DB (structures)
 
 ══ AGENT PLANE ═ ADK multi-agent on Cloud Run ═════════════════════════════
 
-   ┌─────────┐      ┌───────────────┐      ┌────────────────┐
-   │ WATCHER │ ───▶ │  ADJUDICATOR  │ ───▶ │    CASCADE     │
-   │  3.1    │      │   3.1 Pro     │      │  COORDINATOR   │
-   │ Flash-  │      │  (the moat)   │      │    3.1 Pro     │
-   │ Lite    │      │               │      │                │
-   └────┬────┘      └───────┬───────┘      └───────┬────────┘
-        │                   │                      │
-   detect_reclass      reasons over           draft FHIR
-   (data diff)         discordant evidence,    Task / Communication
-        │              GROUNDED in cited        (intent: proposal,
-        ▼              stars + ACMG;             status: draft)
-   BigQuery            WITHHOLDS weak 1★ flips         │
-        ▲                    ⇅                         │
-        │              FIVETRAN MCP                    │
-        │              get_sync_status /               │
-        │              trigger_sync  (mid-loop)        │
-        │                                              │
-   FHIR R4 registry ◀── match_affected_patients ───────┘
-   (Patient · variant Observation · FamilyMemberHistory)
-        │
-        ▼
-   React SPA  (Firebase Hosting, no-login sandbox)
-   clinician REVIEWS and SENDS   ◀── HUMAN IN THE LOOP (draft-only)
+   WATCHER ─▶ ADJUDICATOR ─▶ RESOLUTION ─▶ CASCADE ─▶ STEWARD
+   flash-lite   3.1 Pro       PLANNER       3.1 Pro    3.1 Pro
+   detect       posterior +   next-best-    draft FHIR  ethics +
+   (data diff)  WITHHOLD      evidence      recontact   ClinVar give-back
+        │       (the moat)        │             │            │
+        ▼            ⇅            ▼             ▼            ▼
+   BigQuery   FIVETRAN MCP   score_posterior  FHIR R4 registry (Firestore)
+              freshness +                     Patient · Observation ·
+              targeted re-sync                FamilyMemberHistory
+              (in the loop)                          │
+                                                     ▼
+   React dashboard  ◀── clinician REVIEWS and SENDS (draft-only, HITL)
 ```
 
-- **Models:** `gemini-3.1-flash-lite` for high-frequency delta classification; `gemini-3.1-pro-preview` for adjudication and the recontact-draft synthesis.
-- **Partner superpower (deep MCP):** the agent weaves *multiple* Fivetran MCP operations into its reasoning loop, freshness checks, targeted re-syncs, schema + sync-history as the change signal, not a single token call.
+- **Models:** `gemini-3.1-flash-lite` for high-frequency delta classification; `gemini-3.1-pro-preview` for adjudication, the resolution plan, and the recontact-draft synthesis.
+- **Science:** a calibrated, point-based Bayesian ACMG posterior (Tavtigian 2018/2020); gnomAD feeds PM2/BS1/BA1, AlphaMissense feeds PP3/BP4, every verdict cites its evidence.
+- **Partner superpower (deep MCP):** the loop weaves *multiple* Fivetran MCP operations into its reasoning, freshness checks and targeted re-syncs mid-loop, not a single token call.
 - **Clinical seam, FHIR R4:** like Tracer, but inverted. Tracer fires when the EHR *pushes* a result; Unravel fires when external *evidence* changes, reads the FHIR patient registry, and **writes drafts back**. Aligned to the HL7 Genomics Reporting IG. Same webhook pattern, no EHR modification.
+
+---
+
+## The dashboard
+
+A clinician-facing surveillance console (React + TypeScript), backed by the live engine:
+
+- **Watchlist**: the cohort ranked by urgency, each with its live calibrated posterior, reclassification direction, and "years silent." Selecting a case runs the full five-agent loop with the agent pipeline lighting up node by node and a streaming activity log.
+- **Pedigree**: the family tree: carriers, at-risk relatives, contact details on file, and the recontact gap (who has no email).
+- **Knowledge graph**: one variant, its evidence sources, its carriers, and their relatives, in a single network view.
+- **Cohort**: the counterfactual board (the silent backlog, median years of delay) and a **time machine** that scrubs from the variant's record date to today and watches the reclassification get caught.
+- **Add patient**: write a new FHIR Patient to the registry from the UI.
+- **Evidence sources rail**: live Fivetran freshness for each feed via the MCP, with a one-click targeted re-sync.
+
+Everything shown is computed live (posteriors from BigQuery, verdicts from Gemini, structure from AlphaFold); only the patient cohort is synthetic.
 
 ---
 
@@ -141,25 +148,25 @@ We acknowledge existing work openly, each tool owns only **one** link of the cha
 - **Agent:** Google ADK (code-first, Python), deployed to **Cloud Run** / Agent Runtime
 - **Models:** Gemini 3.1 Flash-Lite + Gemini 3.1 Pro (Vertex AI)
 - **Partner MCP:** Fivetran + Fivetran MCP server
-- **Data:** BigQuery (evidence warehouse) · FHIR R4 patient/VUS registry (HAPI FHIR or FHIR-JSON)
+- **Data:** BigQuery (unified evidence view) · FHIR R4 patient/VUS registry in **Firestore** · AlphaFold DB (structures)
 - **Frontend:** React + TypeScript + Vite on Firebase Hosting
 - **Secrets:** Secret Manager
-- **Optional:** AlphaMissense (computational PP3/BP4 evidence)
+- **Science:** point-based Bayesian ACMG posterior; AlphaMissense (PP3/BP4) + gnomAD (PM2/BS1/BA1)
 
 ---
 
 ## Data sources
 
-- **Evidence (real, public):** ClinVar (with dated assertion history), ClinGen, OncoKB, CIViC.
-- **Patients (synthetic):** Synthea-style cohort + a hand-crafted demo family whose variant genuinely crossed a reclassification boundary on a known date.
+- **Evidence (real, public):** ClinVar (assertions + review stars), gnomAD v4 (allele frequency), AlphaMissense (in-silico missense), AlphaFold (structures). ClinGen expert-panel calls arrive via ClinVar review status; OncoKB / CIViC are future feeds.
+- **Patients (synthetic):** a hand-crafted demo family (Diane Marchetti, MLH1 c.114C>G) whose variant genuinely crossed a reclassification boundary, plus silent-cohort carriers, a deceased-proband case, and the 1-star "trap." A mixed, fictional cohort.
 - No real patient data is used.
 
 ---
 
 ## Evaluation
 
+- **pytest suite** (61 tests) across the engine and tools: calibration anchors, band boundaries, the 1-star withhold, the next-best-evidence tip-over, the warehouse-to-ledger mapping, detection, and the structural clustering.
 - **ClinVar time-replay backtest:** replay dated assertion history and measure precision/recall on variants that genuinely got reclassified. _Results: TODO._
-- **pytest suite** across all tools, including the withhold/abstention paths. _N tests: TODO._
 
 ---
 
@@ -172,28 +179,35 @@ We acknowledge existing work openly, each tool owns only **one** link of the cha
 cd backend
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env                      # set GOOGLE_CLOUD_PROJECT (Vertex via Secret Manager in prod)
-python hello.py                           # smoke-test the agent on Vertex AI
-uvicorn server:app --reload --port 8000   # serve the API the SPA calls
+cp .env.example .env                       # set GOOGLE_CLOUD_PROJECT (Vertex via Secret Manager in prod)
+PYTHONPATH=. python scripts/seed_registry.py   # seed the FHIR cohort into Firestore
+PYTHONPATH=. python -m pytest tests/ -q        # 61 tests
+PYTHONPATH=. uvicorn server:app --reload --port 8000   # serve the API the dashboard calls
 
 # Frontend, React + Vite SPA (proxies /api to :8000)
 cd ../frontend
-npm install
-npm run dev
+npm install && npm run dev
 ```
 
-Deploy: containerise `backend/` → Cloud Run; `npm run build` → Firebase Hosting. See `docs/` for the full deploy + Fivetran connector setup.
+Then open **http://localhost:5173/app** (the dashboard), pick a flagged patient, and run the watch loop. `PYTHONPATH=.` is required so the `unravel` package imports.
+
+Deploy: containerise `backend/` → Cloud Run; `npm run build` → Firebase Hosting.
 
 ---
 
 ## Repository layout
 
 ```
-backend/    ADK agents, tools (Fivetran MCP, detect/match/draft), FHIR write-back
-frontend/   React + TypeScript + Vite SPA (time-machine demo)
-data/        synthetic patient/VUS registry (FHIR), seed evidence
-eval/        ClinVar time-replay backtest + pytest suite
-docs/        architecture, deploy, connector setup
+backend/
+  unravel/    the engine: acmg (Bayesian posterior), evidence (ledger), detection,
+              registry (FHIR + Firestore), adjudicator (Gemini), planner, cascade,
+              steward, structure (AlphaFold), fivetran_mcp, watch (orchestration)
+  scripts/    data extractors (gnomAD, AlphaMissense), registry seeder, MCP smoke test
+  sql/        the unified BigQuery evidence view
+  tests/      pytest suite (61)
+  server.py   FastAPI: /api/cohort · /adjudicate · /plan · /cascade · /steward ·
+              /structural · /pedigree · /graph · /patient · /freshness · /resync
+frontend/     React + TypeScript + Vite dashboard (watchlist, pedigree, graph, cohort)
 ```
 
 ---
