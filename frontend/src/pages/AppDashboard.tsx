@@ -11,6 +11,7 @@ import {
 import PedigreeView from '../dash/PedigreeView';
 import GraphView from '../dash/GraphView';
 import AddPatientView from '../dash/AddPatientView';
+import StructureViewer from '../dash/StructureViewer';
 
 type View = 'watchlist' | 'pedigree' | 'graph' | 'add';
 const NAV: { id: View; label: string; icon: typeof List }[] = [
@@ -375,19 +376,7 @@ export default function AppDashboard() {
                 </OutCard>
               )}
 
-              {casc && (
-                <OutCard title="Cascade Coordinator · draft recontact" edge="var(--path)">
-                  <div style={{ fontSize: '.88rem', marginBottom: '.4rem' }}>
-                    <b>{casc.drafts.length}</b> draft FHIR proposals · {casc.carriers} carrier(s) + {casc.relatives} at-risk relative(s)
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.35rem' }}>
-                    {casc.drafts.map((d) => (
-                      <span key={d.patient_id} style={tag('var(--thread-d)', 'var(--vus-bg)')}>{d.for} · {d.relationship}</span>
-                    ))}
-                  </div>
-                  <div style={{ ...mono({ fontSize: '.64rem' }), color: 'var(--faint)', marginTop: '.5rem' }}>{casc.note}</div>
-                </OutCard>
-              )}
+              {casc && <CascadeCard casc={casc} />}
 
               {stew && (stew.has_deceased_carrier || stew.give_back) && (
                 <OutCard title="Steward · ethics + give-back" edge="var(--benign)">
@@ -405,13 +394,15 @@ export default function AppDashboard() {
               {struc && (
                 <OutCard title="Structural story · AlphaFold + AlphaMissense" edge="var(--thread-d)">
                   <p style={{ fontSize: '.86rem', marginBottom: '.5rem' }}>{struc.summary}</p>
-                  <div style={{ display: 'flex', gap: '1.4rem', flexWrap: 'wrap' }}>
-                    <Stat n={`${struc.enrichment}×`} label="enrichment" tone="path" />
+                  <StructureViewer structural={struc} />
+                  <div style={{ display: 'flex', gap: '1.4rem', flexWrap: 'wrap', marginTop: '.7rem' }}>
+                    <Stat n={`${struc.enrichment}x`} label="enrichment" tone="path" />
                     <Stat n={struc.variant_mean_am.toFixed(2)} label="residue AM" />
                     <Stat n={`${struc.variant_plddt}`} label="pLDDT" />
+                    <Stat n={`${struc.n_neighbours}`} label={`neighbours (${struc.radius_angstrom}A)`} />
                   </div>
                   <a href={struc.structure_page} target="_blank" rel="noreferrer" style={{ fontSize: '.82rem', fontWeight: 600, display: 'inline-block', marginTop: '.5rem' }}>
-                    View AlphaFold model ({struc.uniprot}) →
+                    View on AlphaFold DB ({struc.uniprot}) &rarr;
                   </a>
                 </OutCard>
               )}
@@ -534,6 +525,55 @@ function PipelineNode({ name, state }: { name: Agent; state: NodeState }) {
         {name}{state === 'done' ? ' ✓' : state === 'held' ? ' ⏸' : state === 'running' ? '…' : ''}
       </span>
     </div>
+  );
+}
+
+function CascadeCard({ casc }: { casc: CascadeResult }) {
+  const [showFhir, setShowFhir] = useState(false);
+  const [fhirIdx, setFhirIdx] = useState(0);
+  const draft = casc.drafts[fhirIdx];
+  const fhirBundle = draft ? [draft.communication, draft.risk_assessment].filter(Boolean) : [];
+
+  return (
+    <OutCard title="Cascade Coordinator · draft recontact" edge="var(--path)">
+      <div style={{ fontSize: '.88rem', marginBottom: '.4rem' }}>
+        <b>{casc.drafts.length}</b> draft FHIR proposals, {casc.carriers} carrier(s) + {casc.relatives} at-risk relative(s)
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.35rem' }}>
+        {casc.drafts.map((d, i) => (
+          <button key={d.patient_id} onClick={() => { setFhirIdx(i); setShowFhir(true); }}
+            style={{
+              ...tag('var(--thread-d)', 'var(--vus-bg)'),
+              cursor: 'pointer', border: fhirIdx === i && showFhir ? '1.5px solid var(--thread-d)' : '1px solid transparent',
+            }}>
+            {d.for}, {d.relationship}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', marginTop: '.5rem' }}>
+        <button onClick={() => setShowFhir(!showFhir)}
+          style={{
+            fontFamily: 'var(--mono)', fontSize: '.72rem', fontWeight: 600,
+            padding: '.3rem .6rem', borderRadius: 6,
+            border: '1px solid var(--line)', cursor: 'pointer',
+            background: showFhir ? 'var(--vus-bg)' : 'var(--surface)',
+            color: showFhir ? 'var(--thread-d)' : 'var(--muted)',
+          }}>
+          {showFhir ? 'Hide FHIR' : 'View as FHIR'}
+        </button>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: '.64rem', color: 'var(--faint)' }}>{casc.note}</span>
+      </div>
+      {showFhir && fhirBundle.length > 0 && (
+        <pre style={{
+          marginTop: '.5rem', padding: '.7rem', borderRadius: 8,
+          background: '#0d1117', border: '1px solid #20263a', color: '#aeb6c8',
+          fontFamily: 'var(--mono)', fontSize: '.7rem', lineHeight: 1.5,
+          maxHeight: 300, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>
+          {JSON.stringify({ resourceType: 'Bundle', type: 'collection', entry: fhirBundle.map((r) => ({ resource: r })) }, null, 2)}
+        </pre>
+      )}
+    </OutCard>
   );
 }
 

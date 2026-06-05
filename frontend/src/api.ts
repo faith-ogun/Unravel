@@ -88,6 +88,12 @@ export interface StructuralNeighbour {
   mean_am: number;
 }
 
+export interface HeatmapResidue {
+  residue: number;
+  mean_am: number;
+  plddt: number | null;
+}
+
 export interface Structural {
   gene: string;
   uniprot: string;
@@ -104,6 +110,7 @@ export interface Structural {
   n_neighbours: number;
   radius_angstrom: number;
   pathogenic_neighbours: StructuralNeighbour[];
+  heatmap: HeatmapResidue[];
 }
 
 async function detail(res: Response): Promise<string> {
@@ -188,6 +195,8 @@ export interface CascadeDraft {
   for: string;
   patient_id: string;
   relationship: string;
+  communication?: Record<string, unknown>;
+  risk_assessment?: Record<string, unknown>;
 }
 
 export interface CascadeResult {
@@ -252,8 +261,14 @@ export interface Pedigree {
   needs_contact: PedigreeMember[];
 }
 
-export interface GraphNode { id: string; label: string; type: string; meta?: string; }
-export interface GraphEdge { source: string; target: string; }
+export interface GraphNode {
+  id: string; label: string; type: string;
+  meta?: string; size?: number; detail?: string;
+}
+export interface GraphEdge {
+  source: string; target: string;
+  weight?: number; label?: string;
+}
 export interface Graph { nodes: GraphNode[]; edges: GraphEdge[]; }
 
 export interface NewPatientPayload {

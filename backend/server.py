@@ -164,7 +164,7 @@ def structural(gene: str, hgvs_p: str | None = None, residue: int | None = None)
     """AlphaFold + AlphaMissense structural context for a variant residue."""
     from unravel.structure import structural_context
     try:
-        sc = structural_context(gene, hgvs_p=hgvs_p, residue=residue, include_heatmap=False)
+        sc = structural_context(gene, hgvs_p=hgvs_p, residue=residue, include_heatmap=True)
         return {
             "gene": sc.gene,
             "uniprot": sc.uniprot,
@@ -182,6 +182,7 @@ def structural(gene: str, hgvs_p: str | None = None, residue: int | None = None)
             "radius_angstrom": sc.radius_angstrom,
             "pathogenic_neighbours": sorted(
                 sc.pathogenic_neighbours, key=lambda n: -n["mean_am"])[:8],
+            "heatmap": sc.heatmap,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
