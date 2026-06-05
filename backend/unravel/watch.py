@@ -186,7 +186,7 @@ def pedigree_patient(pid: str) -> dict:
 
 
 def graph_patient(pid: str, *, client=None) -> dict:
-    """Knowledge graph for a patient's variant: variant <-> evidence <-> family."""
+    """Rich knowledge graph: variant at centre, deep evidence branches, family."""
     if client is None:
         from google.cloud import bigquery
         client = bigquery.Client(project=registry.PROJECT)
@@ -194,40 +194,170 @@ def graph_patient(pid: str, *, client=None) -> dict:
     if r is None:
         return {"nodes": [], "edges": []}
     ctx = r["ctx"]
+    post = r["post"]
     match = registry.match_affected_patients(r["key"], data=r["data"])
 
-    nodes: list[dict] = [{
-        "id": "variant", "label": f"{r['gene']} {r['hgvs_c']}", "type": "variant",
-        "meta": f"{r['current_class']} · {r['review_stars']}★",
-    }]
+    nodes: list[dict] = []
     edges: list[dict] = []
 
-    af = ctx.gnomad_af
-    sources = [
-        ("clinvar", "ClinVar", f"{r['current_class']} ({r['review_stars']}★)"),
-        ("gnomad", "gnomAD", "absent" if af is None else f"AF {af:.2g}"),
-        ("alphamissense", "AlphaMissense",
-         "n/a" if ctx.am_pathogenicity is None else f"{ctx.am_pathogenicity:.2f} ({ctx.am_class})"),
-        ("alphafold", "AlphaFold", "structure"),
-    ]
-    for sid, label, meta in sources:
-        nodes.append({"id": sid, "label": label, "type": "source", "meta": meta})
-        edges.append({"source": sid, "target": "variant"})
+    def add(nid, label, ntype, meta="", size=1.0, detail=""):
+        nodes.append({"id": nid, "label": label, "type": ntype,
+                      "meta": meta, "size": size, "detail": detail})
 
+    def link(src, tgt, weight=1.0, label=""):
+        edges.append({"source": src, "target": tgt, "weight": weight, "label": label})
+
+    gene = r["gene"]
+    hgvs_c = r["hgvs_c"]
+    hgvs_p = r.get("hgvs_p") or ""
+
+    add("variant", f"{gene} {hgvs_c}", "variant",
+        meta=f"{r['current_class']} ({r['review_stars']}★)",
+        size=2.0,
+        detail=f"Protein change: {hgvs_p}. Posterior: {post.posterior:.2f} ({post.band.value}). Points: {post.points}.")
+
+    # -- gene node
+    add("gene", gene, "gene", meta="gene symbol", size=1.4,
+        detail=f"{gene} encodes a protein involved in DNA mismatch repair. Pathogenic variants in this gene are associated with Lynch syndrome (hereditary nonpolyposis colorectal cancer).")
+    link("variant", "gene", label="in gene")
+
+    # -- protein node
+    protein_label = f"{gene} protein"
+    if ctx.am_pathogenicity is not None:
+        protein_detail = f"AlphaMissense pathogenicity for the variant residue: {ctx.am_pathogenicity:.3f} ({ctx.am_class}). The protein has domains critical for mismatch repair function."
+    else:
+        protein_detail = "Protein structure available from AlphaFold DB."
+    add("protein", protein_label, "protein", meta="protein product", size=1.2, detail=protein_detail)
+    link("gene", "protein", label="encodes")
+
+    # -- ClinVar branch: top-level + sub-nodes for review status / submitters / history
+    cv_class = r["current_class"] or "unknown"
+    stars = r["review_stars"] or 0
+    n_sub = ctx.number_submitters
+    add("clinvar", "ClinVar", "source", meta=f"{cv_class}", size=1.3,
+        detail=f"ClinVar aggregates submitted interpretations of genetic variants. This variant is currently classified as '{cv_class}' with {stars} review star(s).")
+    link("variant", "clinvar", weight=1.5, label="classified by")
+
+    add("cv-class", cv_class.title(), "evidence",
+        meta=f"{stars}★ review",
+        detail=f"The current aggregate classification is '{cv_class}'. A higher star rating indicates stronger expert consensus. {stars}★ means {'expert panel reviewed' if stars >= 3 else 'criteria provided, ' + ('multiple submitters' if (n_sub or 0) > 1 else 'single submitter')}.")
+    link("clinvar", "cv-class", label="classification")
+
+    add("cv-review", f"{stars}★ review", "evidence",
+        meta=f"{n_sub or '?'} submitter(s)",
+        detail=f"Review status: {stars} star(s) from {n_sub or '?'} submitter(s). ClinVar review stars range from 0 (no assertion) to 4 (practice guideline). The star rating reflects consensus strength, not variant pathogenicity.")
+    link("clinvar", "cv-review", label="review status")
+
+    if stars < 3:
+        add("cv-caution", "Low confidence", "warning",
+            meta=f"only {stars}★",
+            detail=f"This variant has only {stars} review star(s). Single-submitter or no-criteria assertions are less reliable. The Adjudicator may withhold action on low-confidence assertions.")
+        link("cv-review", "cv-caution", label="caution")
+
+    # -- gnomAD branch: frequency + population detail
+    af = ctx.gnomad_af
+    if af is not None:
+        af_str = f"{af:.2e}" if af < 0.001 else f"{af:.4f}"
+        af_meta = f"AF {af_str}"
+    else:
+        af_str = "absent"
+        af_meta = "absent"
+    add("gnomad", "gnomAD v4", "source", meta=af_meta, size=1.3,
+        detail=f"gnomAD (Genome Aggregation Database) catalogues allele frequencies across >800k individuals from diverse populations. This variant is {af_meta} in gnomAD.")
+    link("variant", "gnomad", weight=1.3, label="population freq")
+
+    add("gnomad-freq", f"AF: {af_str}", "evidence",
+        meta="allele frequency",
+        detail=f"The allele frequency is {af_str}. {'Absent or ultra-rare variants support pathogenicity (PM2).' if af is None or af < 1e-4 else 'Common variants support a benign interpretation (BS1/BA1).' if af > 0.01 else 'Intermediate frequency: no strong ACMG criterion.'}")
+    link("gnomad", "gnomad-freq", label="frequency")
+
+    if af is None or af < 1e-4:
+        add("gnomad-rare", "Ultra-rare / absent", "criterion",
+            meta="PM2 Supporting",
+            detail="Absence or ultra-rarity in population databases supports pathogenicity under ACMG criterion PM2 at Supporting strength.")
+        link("gnomad-freq", "gnomad-rare", label="ACMG criterion")
+    elif af > 0.05:
+        add("gnomad-common", "Common (>5%)", "criterion",
+            meta="BA1 Stand-alone benign",
+            detail="An allele frequency above 5% is a stand-alone benign criterion (BA1). This alone classifies the variant as benign.")
+        link("gnomad-freq", "gnomad-common", label="ACMG criterion")
+    elif af > 0.01:
+        add("gnomad-bs1", "Frequent (>1%)", "criterion",
+            meta="BS1 Strong benign",
+            detail="An allele frequency above 1% provides strong benign evidence (BS1).")
+        link("gnomad-freq", "gnomad-bs1", label="ACMG criterion")
+
+    # -- AlphaMissense branch
+    am = ctx.am_pathogenicity
+    am_cls = ctx.am_class or "n/a"
+    add("alphamissense", "AlphaMissense", "source",
+        meta=f"{am:.3f}" if am else "n/a", size=1.3,
+        detail="AlphaMissense is a deep learning model from DeepMind that predicts the pathogenicity of all possible single amino acid substitutions across the human proteome. It is calibrated against ClinVar and provides per-residue pathogenicity scores.")
+    link("protein", "alphamissense", weight=1.2, label="predicted by")
+
+    if am is not None:
+        add("am-score", f"Score: {am:.3f}", "evidence",
+            meta=am_cls,
+            detail=f"AlphaMissense score: {am:.3f}, classified as '{am_cls}'. Thresholds: >0.564 = likely pathogenic, <0.34 = likely benign, between = ambiguous.")
+        link("alphamissense", "am-score", label="pathogenicity")
+
+        if am >= 0.564:
+            strength = "Strong" if am >= 0.99 else "Moderate" if am >= 0.90 else "Supporting"
+            add("am-pp3", f"PP3 ({strength})", "criterion",
+                meta="in-silico pathogenic",
+                detail=f"AlphaMissense score {am:.3f} meets the PP3 criterion at {strength} strength. This computational evidence supports pathogenicity.")
+            link("am-score", "am-pp3", label="ACMG criterion")
+        elif am <= 0.34:
+            add("am-bp4", "BP4 (Supporting)", "criterion",
+                meta="in-silico benign",
+                detail=f"AlphaMissense score {am:.3f} meets the BP4 criterion at Supporting strength. This computational evidence supports a benign interpretation.")
+            link("am-score", "am-bp4", label="ACMG criterion")
+
+    # -- AlphaFold branch
+    add("alphafold", "AlphaFold", "source", meta="3D structure", size=1.2,
+        detail="AlphaFold (DeepMind) predicts protein 3D structures with near-experimental accuracy. The structure contextualises the variant's location: is it in a functional domain, a buried core, or a flexible loop?")
+    link("protein", "alphafold", label="structure from")
+
+    add("af-structure", "3D structure", "evidence", meta="protein fold",
+        detail="The AlphaFold-predicted structure shows the spatial environment of the variant residue, including whether it sits in a pathogenic neighbourhood (clustered with other high-AM residues).")
+    link("alphafold", "af-structure", label="model")
+
+    add("af-neighbourhood", "3D neighbourhood", "evidence", meta="spatial context",
+        detail="The variant residue's 3D neighbours (within 8 angstroms in the folded protein) are assessed for AlphaMissense enrichment. A cluster of pathogenic residues around the variant strengthens the structural argument.")
+    link("af-structure", "af-neighbourhood", label="spatial analysis")
+
+    # -- ACMG posterior node
+    add("posterior", f"Posterior: {post.posterior:.2f}", "verdict",
+        meta=post.band.value, size=1.5,
+        detail=f"Calibrated Bayesian posterior probability of pathogenicity: {post.posterior:.4f}. ACMG band: {post.band.value}. Total evidence points: {post.points}. {'Actionable (crosses the 0.90 threshold).' if post.is_actionable else f'Gap to actionable: {post.points_to_actionable} points.'}")
+    link("variant", "posterior", weight=1.8, label="scored as")
+
+    for item in ctx.ledger.items:
+        crit_id = f"crit-{item.code}-{item.source}".lower().replace(" ", "-")
+        if not any(n["id"] == crit_id for n in nodes):
+            add(crit_id, f"{item.code} ({item.effective_strength.value})", "criterion",
+                meta=item.source,
+                detail=item.detail or f"{item.code} from {item.source} at {item.effective_strength.value} strength.")
+            link(crit_id, "posterior", label="contributes")
+
+    # -- family / carriers / relatives
     for c in match["carriers"]:
         cid = c["patient"]["id"]
-        n = (c["patient"].get("name") or [{}])[0]
-        nodes.append({"id": cid, "type": "carrier",
-                      "label": f"{' '.join(n.get('given', []))} {n.get('family', '')}".strip(),
-                      "meta": "carrier" + (" †" if c.get("deceased") else "")})
-        edges.append({"source": "variant", "target": cid})
+        name = _patient_name(c["patient"])
+        deceased = c.get("deceased", False)
+        add(cid, name, "carrier",
+            meta="carrier" + (" (deceased)" if deceased else ""), size=1.1,
+            detail=f"{name} is a confirmed carrier of this variant.{' This patient is deceased; recontact routes through ethics/next-of-kin.' if deceased else ' Eligible for updated genetic counselling if the variant is reclassified.'}")
+        link("variant", cid, weight=1.4, label="carried by")
+
     for rel in match["relatives"]:
         rid = rel["patient"]["id"]
-        n = (rel["patient"].get("name") or [{}])[0]
-        nodes.append({"id": rid, "type": "relative",
-                      "label": f"{' '.join(n.get('given', []))} {n.get('family', '')}".strip(),
-                      "meta": rel["relationship"]})
-        edges.append({"source": rel["carrier_id"], "target": rid})
+        name = _patient_name(rel["patient"])
+        relationship = rel["relationship"]
+        add(rid, name, "relative",
+            meta=relationship, size=0.9,
+            detail=f"{name} is {relationship} to a confirmed carrier. As a first-degree relative, they have a 50% prior probability of carrying the variant and may benefit from predictive testing if the variant is reclassified.")
+        link(rel["carrier_id"], rid, weight=1.0, label=relationship)
 
     return {"nodes": nodes, "edges": edges}
 
