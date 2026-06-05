@@ -1,19 +1,14 @@
-<!--
-  This README is written for the NEW, public `unravel` build repository.
-  Drop it into that repo's root. Fill the placeholders marked _TODO_ as the build lands.
--->
-
 # Unravel
 
 **Closing the one diagnostic loop in medicine that stays open for *years*, for the patient *and* their family.**
 
 Unravel is a genomics-native agent that continuously re-reads the world's evolving variant evidence against a clinic's historical genetic reports, and the moment a **Variant of Uncertain Significance (VUS)** is reclassified as dangerous, it drafts the reclassification alert **and** the cascade-testing fan-out for the at-risk family, for a clinician to review and send.
 
-Built for the **Google Cloud Rapid Agent Hackathon** · **Fivetran track**.
+Built for the **Google Cloud Rapid Agent Hackathon** | **Fivetran track**.
 
-- 🔗 **Live demo (no login):** _TODO_
-- 🎥 **3-minute video:** _TODO_
-- 🧬 **Powered by** Gemini 3.1 · Google ADK → Cloud Run · Fivetran MCP · BigQuery · Firestore (FHIR R4) · AlphaFold + AlphaMissense
+- **Live demo (no login):** _coming soon_
+- **3-minute video:** _coming soon_
+- **Powered by** Gemini 3.1 | Google ADK on Cloud Run | Fivetran MCP | BigQuery | Firestore (FHIR R4) | AlphaFold + AlphaMissense
 
 ---
 
@@ -27,12 +22,12 @@ It changed. In **2023 a ClinGen expert panel reclassified that exact variant to 
 
 This is the *"diagnostic loop that never closes,"* rendered genomics-native and temporally extreme:
 
-- A VUS takes **18–24 months, 5+ years for rare genes** to reclassify.
+- A VUS takes **18 to 24 months, 5+ years for rare genes** to reclassify.
 - By then the original patient may be in remission or deceased: **24% of genetic counsellors have received a reclassified VUS for a patient who had already died**, with no guideline for what happens next.
 - A germline variant is **heritable**, so the life it threatens next is a **relative's**. Unravel is **cascade-first**: the beneficiary is the living at-risk family.
 - The **duty to recontact** is described by ACMG itself as *"desirable but not currently feasible."* That sentence is the reason Unravel exists.
 
-It is **disease-agnostic**, hereditary cancer **and** rare/paediatric disease (where reclassification can end a diagnostic odyssey and change reproductive decisions).
+It is **disease-agnostic**: hereditary cancer **and** rare/paediatric disease (where reclassification can end a diagnostic odyssey and change reproductive decisions).
 
 ---
 
@@ -40,7 +35,7 @@ It is **disease-agnostic**, hereditary cancer **and** rare/paediatric disease (w
 
 Unravel runs one tight loop, end to end:
 
-**evidence change → calibrated adjudication → next-best-evidence plan → family cascade → drafted FHIR recontact + ClinVar give-back.**
+**evidence change -> calibrated adjudication -> next-best-evidence plan -> family cascade -> drafted FHIR recontact + ClinVar give-back.**
 
 1. **Watch** evolving evidence (ClinVar + gnomAD + AlphaMissense), kept fresh by Fivetran in BigQuery.
 2. **Detect** a material change against the clinic's historical VUS registry (deterministic, auditable).
@@ -64,79 +59,82 @@ Genuinely multi-agent (an ADK coordinator pattern), each operating on different 
 | **5. Steward** (Ethics & Give-back) | 3.1 Pro | edge cases + on resolution | Route deceased-proband cases to an ethics/next-of-kin pathway (never a letter); draft a ClinVar give-back submission. |
 
 ### Why it's an agent, not a cron job
-Detecting a status flip is deterministic. **Adjudicating it is not.** ClinVar carries conflicting submissions at different review/star levels; expert panels disagree with single-submitter assertions; ontologies mismatch. Deciding whether a VUS has *actually* crossed the actionability threshold, and correctly **withholding** a flip that's only a low-confidence 1★ submission, is genuine LLM reasoning. The **rules / AI boundary** is explicit: deterministic code does the diff and gene-tier rules; the Gemini agents do the messy, contradictory, language-heavy adjudication.
+
+Detecting a status flip is deterministic. **Adjudicating it is not.** ClinVar carries conflicting submissions at different review/star levels; expert panels disagree with single-submitter assertions; ontologies mismatch. Deciding whether a VUS has *actually* crossed the actionability threshold, and correctly **withholding** a flip that's only a low-confidence single-submitter assertion, is genuine LLM reasoning. The **rules / AI boundary** is explicit: deterministic code does the diff and gene-tier rules; the Gemini agents do the messy, contradictory, language-heavy adjudication.
 
 ---
 
 ## Architecture
 
 ```
-══ EVIDENCE PLANE ═════════════════════════════════════════════════════════
+== EVIDENCE PLANE =====================================================
 
-   ClinVar       ┐
-   gnomAD        ├──▶  FIVETRAN  ──▶  BigQuery  (unified evidence view)
-   AlphaMissense ┘     GCS connectors          AlphaFold DB (structures)
+   ClinVar       |
+   gnomAD        |--->  FIVETRAN  --->  BigQuery  (unified evidence view)
+   AlphaMissense |      GCS connectors          AlphaFold DB (structures)
 
-══ AGENT PLANE ═ ADK multi-agent on Cloud Run ═════════════════════════════
+== AGENT PLANE = ADK multi-agent on Cloud Run =========================
 
-   WATCHER ─▶ ADJUDICATOR ─▶ RESOLUTION ─▶ CASCADE ─▶ STEWARD
+   WATCHER --> ADJUDICATOR --> RESOLUTION --> CASCADE --> STEWARD
    flash-lite   3.1 Pro       PLANNER       3.1 Pro    3.1 Pro
    detect       posterior +   next-best-    draft FHIR  ethics +
    (data diff)  WITHHOLD      evidence      recontact   ClinVar give-back
-        │       (the moat)        │             │            │
-        ▼            ⇅            ▼             ▼            ▼
+        |       (the moat)        |             |            |
+        v            |            v             v            v
    BigQuery   FIVETRAN MCP   score_posterior  FHIR R4 registry (Firestore)
-              freshness +                     Patient · Observation ·
+              freshness +                     Patient | Observation |
               targeted re-sync                FamilyMemberHistory
-              (in the loop)                          │
-                                                     ▼
-   React dashboard  ◀── clinician REVIEWS and SENDS (draft-only, HITL)
+              (in the loop)                          |
+                                                     v
+   React dashboard  <-- clinician REVIEWS and SENDS (draft-only, HITL)
 ```
 
 - **Models:** `gemini-3.1-flash-lite` for high-frequency delta classification; `gemini-3.1-pro-preview` for adjudication, the resolution plan, and the recontact-draft synthesis.
 - **Science:** a calibrated, point-based Bayesian ACMG posterior (Tavtigian 2018/2020); gnomAD feeds PM2/BS1/BA1, AlphaMissense feeds PP3/BP4, every verdict cites its evidence.
-- **Partner superpower (deep MCP):** the loop weaves *multiple* Fivetran MCP operations into its reasoning, freshness checks and targeted re-syncs mid-loop, not a single token call.
+- **Partner superpower (deep MCP):** the loop weaves *multiple* Fivetran MCP operations into its reasoning: freshness checks and targeted re-syncs mid-loop, not a single token call.
 - **Clinical seam, FHIR R4:** like Tracer, but inverted. Tracer fires when the EHR *pushes* a result; Unravel fires when external *evidence* changes, reads the FHIR patient registry, and **writes drafts back**. Aligned to the HL7 Genomics Reporting IG. Same webhook pattern, no EHR modification.
 
 ---
 
 ## The dashboard
 
-A clinician-facing surveillance console (React + TypeScript), backed by the live engine:
+A clinician-facing surveillance console (React + TypeScript + Vite), backed by the live engine:
 
 - **Watchlist**: the cohort ranked by urgency, each with its live calibrated posterior, reclassification direction, and "years silent." Selecting a case runs the full five-agent loop with the agent pipeline lighting up node by node and a streaming activity log.
-- **Pedigree**: the family tree: carriers, at-risk relatives, contact details on file, and the recontact gap (who has no email).
-- **Knowledge graph**: one variant, its evidence sources, its carriers, and their relatives, in a single network view.
-- **Cohort**: the counterfactual board (the silent backlog, median years of delay) and a **time machine** that scrubs from the variant's record date to today and watches the reclassification get caught.
-- **Add patient**: write a new FHIR Patient to the registry from the UI.
+- **3D structural viewer**: an interactive AlphaFold protein structure (via 3Dmol.js) coloured by AlphaMissense pathogenicity, pLDDT confidence, or pathogenic neighbourhood. The variant residue is highlighted with its 3D context. Rotate, zoom, click between colour modes.
+- **Knowledge graph**: a deep, explorable evidence network. The variant branches into ClinVar (classification, review status, submitter count), gnomAD (allele frequency, ACMG criterion), AlphaMissense (score, PP3/BP4), AlphaFold (structure, 3D neighbourhood), the calibrated posterior, and every carrier and at-risk relative. Click any node to see a detail panel explaining what it is and why it matters.
+- **Pedigree**: switchable family trees for each reclassified patient. Carriers, at-risk relatives, contact details on file, and the recontact gap (who has no email, who is deceased).
+- **FHIR reveal**: click any draft recontact to see the raw FHIR Bundle (Communication + RiskAssessment) the Cascade Coordinator produced. Draft-only, intent: proposal.
+- **Resolution plan**: the next-best-evidence card showing which experiment (segregation, tumour IHC/MSI, functional, splicing) would move the needle most, projected posterior, and whether it crosses the actionable threshold.
 - **Evidence sources rail**: live Fivetran freshness for each feed via the MCP, with a one-click targeted re-sync.
+- **Add patient**: write a new FHIR Patient to the registry from the UI with a professional clinical intake form.
 
 Everything shown is computed live (posteriors from BigQuery, verdicts from Gemini, structure from AlphaFold); only the patient cohort is synthetic.
 
 ---
 
-## Prior art & how Unravel differs
+## Prior art and how Unravel differs
 
-We acknowledge existing work openly, each tool owns only **one** link of the chain:
+We acknowledge existing work openly. Each tool owns only **one** link of the chain:
 
 | Capability | iVar *(lab DB)* | VUSVista *(curation aid)* | **Unravel** |
 |---|:---:|:---:|:---:|
-| Detect evidence changed | ✗ | ✓ (curator) | ✓ (autonomous) |
-| Find who carries the variant | ✓ (DB lookup) | ✗ | ✓ (patient + pedigree) |
-| Reason over discordant evidence | ✗ | ✗ | ✓ (agentic + withhold) |
-| Fan out to the at-risk family | ✗ | ✗ | ✓ (cascade) |
-| Draft recontact / FHIR write-back | ✗ | ✗ | ✓ (draft-only) |
-| An autonomous agent (vs human tool) | ✗ | ✗ | ✓ (ADK multi-agent) |
+| Detect evidence changed | no | yes (curator) | yes (autonomous) |
+| Find who carries the variant | yes (DB lookup) | no | yes (patient + pedigree) |
+| Reason over discordant evidence | no | no | yes (agentic + withhold) |
+| Fan out to the at-risk family | no | no | yes (cascade) |
+| Draft recontact / FHIR write-back | no | no | yes (draft-only) |
+| An autonomous agent (vs human tool) | no | no | yes (ADK multi-agent) |
 
 > *iVar tells a lab **who** carries a variant. VUSVista tells a curator **when** the evidence moved. Unravel is the autonomous agent that does both, then closes the loop the others leave open: it reasons about whether the change is real, finds the patient **and the at-risk family**, and drafts the recontact no one else is built to send.*
 
 ---
 
-## Safety & guardrails ("what this isn't")
+## Safety and guardrails ("what this isn't")
 
-- **Draft-only · clinician-facing · never patient-facing · never autonomous.** The agent draws the line at *notification, not action*.
-- **Asymmetric by design:** actionable upgrades surfaced loudly; the (more common) VUS→benign downgrades handled as quiet de-escalation. False-positive management over raw sensitivity.
-- **Provenance is first-class:** a 1★ single submission is never treated as equal to a ClinGen expert-panel call.
+- **Draft-only, clinician-facing, never patient-facing, never autonomous.** The agent draws the line at *notification, not action*.
+- **Asymmetric by design:** actionable upgrades surfaced loudly; the (more common) VUS-to-benign downgrades handled as quiet de-escalation. False-positive management over raw sensitivity.
+- **Provenance is first-class:** a single-submitter assertion is never treated as equal to a ClinGen expert-panel call.
 - **Actionability-grounded:** urgency tiered by gene (BRCA1/2, Lynch genes highest).
 - **Synthetic patients only.** No real PHI anywhere in this repo or demo.
 - Unravel does **not** diagnose, does **not** make clinical decisions, and does **not** contact patients. It surfaces a reviewed draft for a qualified clinician.
@@ -148,8 +146,8 @@ We acknowledge existing work openly, each tool owns only **one** link of the cha
 - **Agent:** Google ADK (code-first, Python), deployed to **Cloud Run** / Agent Runtime
 - **Models:** Gemini 3.1 Flash-Lite + Gemini 3.1 Pro (Vertex AI)
 - **Partner MCP:** Fivetran + Fivetran MCP server
-- **Data:** BigQuery (unified evidence view) · FHIR R4 patient/VUS registry in **Firestore** · AlphaFold DB (structures)
-- **Frontend:** React + TypeScript + Vite on Firebase Hosting
+- **Data:** BigQuery (unified evidence view) | FHIR R4 patient/VUS registry in **Firestore** | AlphaFold DB (structures)
+- **Frontend:** React + TypeScript + Vite on Firebase Hosting | 3Dmol.js (protein structure) | react-force-graph-2d (knowledge graph)
 - **Secrets:** Secret Manager
 - **Science:** point-based Bayesian ACMG posterior; AlphaMissense (PP3/BP4) + gnomAD (PM2/BS1/BA1)
 
@@ -158,7 +156,7 @@ We acknowledge existing work openly, each tool owns only **one** link of the cha
 ## Data sources
 
 - **Evidence (real, public):** ClinVar (assertions + review stars), gnomAD v4 (allele frequency), AlphaMissense (in-silico missense), AlphaFold (structures). ClinGen expert-panel calls arrive via ClinVar review status; OncoKB / CIViC are future feeds.
-- **Patients (synthetic):** a hand-crafted demo family (Diane Marchetti, MLH1 c.114C>G) whose variant genuinely crossed a reclassification boundary, plus silent-cohort carriers, a deceased-proband case, and the 1-star "trap." A mixed, fictional cohort.
+- **Patients (synthetic):** a hand-crafted demo family (Diane Marchetti, MLH1 c.114C>G) whose variant genuinely crossed a reclassification boundary, plus silent-cohort carriers, a deceased-proband case, and the 1-star "trap." A mixed, fictional cohort of 20 patients across varied backgrounds.
 - No real patient data is used.
 
 ---
@@ -166,7 +164,7 @@ We acknowledge existing work openly, each tool owns only **one** link of the cha
 ## Evaluation
 
 - **pytest suite** (61 tests) across the engine and tools: calibration anchors, band boundaries, the 1-star withhold, the next-best-evidence tip-over, the warehouse-to-ledger mapping, detection, and the structural clustering.
-- **ClinVar time-replay backtest:** replay dated assertion history and measure precision/recall on variants that genuinely got reclassified. _Results: TODO._
+- **ClinVar time-replay backtest:** replay dated assertion history and measure precision/recall on variants that genuinely got reclassified.
 
 ---
 
@@ -175,23 +173,23 @@ We acknowledge existing work openly, each tool owns only **one** link of the cha
 > Requires a Google Cloud project (Vertex AI, Cloud Run, BigQuery, Firestore, Secret Manager enabled) and a Fivetran account.
 
 ```bash
-# Backend, ADK agents + API (Python 3.12)
+# Backend: ADK agents + API (Python 3.12)
 cd backend
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env                       # set GOOGLE_CLOUD_PROJECT (Vertex via Secret Manager in prod)
+cp .env.example .env                       # set GOOGLE_CLOUD_PROJECT
 PYTHONPATH=. python scripts/seed_registry.py   # seed the FHIR cohort into Firestore
 PYTHONPATH=. python -m pytest tests/ -q        # 61 tests
-PYTHONPATH=. uvicorn server:app --reload --port 8000   # serve the API the dashboard calls
+PYTHONPATH=. uvicorn server:app --reload --port 8000   # serve the API
 
-# Frontend, React + Vite SPA (proxies /api to :8000)
+# Frontend: React + Vite SPA (proxies /api to :8000)
 cd ../frontend
 npm install && npm run dev
 ```
 
 Then open **http://localhost:5173/app** (the dashboard), pick a flagged patient, and run the watch loop. `PYTHONPATH=.` is required so the `unravel` package imports.
 
-Deploy: containerise `backend/` → Cloud Run; `npm run build` → Firebase Hosting.
+Deploy: containerise `backend/` to Cloud Run; `npm run build` to Firebase Hosting.
 
 ---
 
@@ -205,9 +203,12 @@ backend/
   scripts/    data extractors (gnomAD, AlphaMissense), registry seeder, MCP smoke test
   sql/        the unified BigQuery evidence view
   tests/      pytest suite (61)
-  server.py   FastAPI: /api/cohort · /adjudicate · /plan · /cascade · /steward ·
-              /structural · /pedigree · /graph · /patient · /freshness · /resync
-frontend/     React + TypeScript + Vite dashboard (watchlist, pedigree, graph, cohort)
+  server.py   FastAPI: /api/cohort, /adjudicate, /plan, /cascade, /steward,
+              /structural, /pedigree, /graph, /patient, /freshness, /resync
+frontend/
+  src/pages/  landing page, technology page, mission page, app dashboard
+  src/dash/   graph view, pedigree view, structure viewer, add-patient form
+  src/api.ts  typed API client
 ```
 
 ---
