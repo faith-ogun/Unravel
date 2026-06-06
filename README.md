@@ -86,8 +86,11 @@ Detecting a status flip is deterministic. **Adjudicating it is not.** ClinVar ca
               targeted re-sync                FamilyMemberHistory
               (in the loop)                          |
                                                      v
-   React dashboard  <-- clinician REVIEWS and SENDS (draft-only, HITL)
+   React SPA (Firebase Hosting, /api -> Cloud Run)
+                    <-- clinician REVIEWS and SENDS (draft-only, HITL)
 ```
+
+> Live: **https://unravel-ra.web.app** (SPA on Firebase Hosting) rewrites `/api` to the Cloud Run service (same-origin, no CORS); the service runs the ADK agents on Vertex/Gemini over BigQuery + Firestore.
 
 - **Models:** `gemini-3.1-flash-lite` for high-frequency delta classification; `gemini-3.1-pro-preview` for adjudication, the resolution plan, and the recontact-draft synthesis.
 - **Science:** a calibrated, point-based Bayesian ACMG posterior (Tavtigian 2018/2020); gnomAD feeds PM2/BS1/BA1, AlphaMissense feeds PP3/BP4, every verdict cites its evidence.
