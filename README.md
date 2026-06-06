@@ -6,7 +6,7 @@ Unravel is a genomics-native agent that continuously re-reads the world's evolvi
 
 Built for the **Google Cloud Rapid Agent Hackathon** | **Fivetran track**.
 
-- **Live demo (no login):** _coming soon_
+- **Live demo (no login):** https://unravel-ra.web.app  ·  **API:** https://unravel-api-306681961993.us-central1.run.app
 - **3-minute video:** _coming soon_
 - **Powered by** Gemini 3.1 | Google ADK on Cloud Run | Fivetran MCP | BigQuery | Firestore (FHIR R4) | AlphaFold + AlphaMissense
 
