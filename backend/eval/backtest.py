@@ -119,6 +119,23 @@ def evaluate(cohort: dict | None = None) -> dict:
     detection = _binary_metrics(tp, fp, fn, tn)
     detection["direction_accuracy"] = round(dir_ok / (dir_ok + dir_bad), 4) if (dir_ok + dir_bad) else 0.0
 
+    # The positive detections cross a category boundary by construction, so flagging
+    # them is a deterministic regression check, not skill. The non-tautological test
+    # is SPECIFICITY on hard negatives: cases where the ClinVar text changes but the
+    # category does not (e.g. "Likely pathogenic" -> "Pathogenic"), which must not be
+    # flagged. This actually exercises the category-collapse logic.
+    hard = [e for e in expectations if e["scenario"] == "stable_textvariant"]
+    hard_fp = sum(1 for e in hard if e["patient_id"] in by_pid)
+    detection["hard_negatives"] = {
+        "n": len(hard),
+        "false_positives": hard_fp,
+        "specificity": round((len(hard) - hard_fp) / len(hard), 4) if hard else None,
+        "note": "text changes that do not cross a category boundary; the real specificity test",
+    }
+    detection["positives_note"] = ("Reclassification positives cross a category boundary by "
+                                   "construction; P/R/F1 here is a deterministic regression check, "
+                                   "not an accuracy measurement.")
+
     # --- action scoring (over the cases that were correctly detected) ---
     actions = [a for a in ("actionable", "withhold", "reassure", "ethics")]
     confusion = {a: {b: 0 for b in actions} for a in actions}

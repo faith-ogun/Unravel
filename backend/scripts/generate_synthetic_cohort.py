@@ -207,6 +207,31 @@ class Builder:
             "cascade_relatives": 0,
         })
 
+    # Same-category text variants: real ClinVar wording that differs from the
+    # recorded value but does NOT cross a category boundary. The system must not
+    # raise a false reclassification on these. This is the non-tautological test
+    # of the category-collapse logic (a clinically already-actionable LP->P is
+    # not a new VUS-crossing event; cosmetic benign churn is not an alarm).
+    SAME_CAT_PATH = ["Likely pathogenic", "Pathogenic/Likely pathogenic"]
+    SAME_CAT_BENIGN = ["Likely benign", "Benign/Likely benign"]
+
+    def emit_hard_negative(self, case: dict, side: str):
+        sig = post_significance(case)  # the warehouse current (resolved P or B)
+        simple = 1 if side == "path" else 0
+        self._add_warehouse(case["gid"], sig, simple, case.get("current_stars", 3),
+                            case["post_state"].get("year"))
+        recorded = self.rng.choice(self.SAME_CAT_PATH if side == "path" else self.SAME_CAT_BENIGN)
+        pid, oid, anc = self._carrier(case, recorded, sig)
+        self.expectations.append({
+            "patient_id": pid, "observation_id": oid, "gid": case["gid"],
+            "gene": case["gene"], "ancestry": anc,
+            "ancestry_underrepresented": ANCESTRIES[anc]["under"],
+            "scenario": "stable_textvariant", "expected_detection": False,
+            "expected_direction": None, "expected_action": "none",
+            "recorded_class": recorded, "current_class": sig,
+            "cascade_relatives": 0,
+        })
+
     def emit_unchanged(self, case: dict):
         # Tested AFTER the variant resolved: recorded == current, so no diff.
         sig = post_significance(case)
@@ -243,6 +268,7 @@ class Builder:
             "upgrade_actionable": round(self.n * 0.18),
             "downgrade": round(self.n * 0.12),
             "trap_1star": round(self.n * 0.05),
+            "stable_textvariant": round(self.n * 0.08),
         }
         plan["unchanged_stable"] = self.n - sum(plan.values())
 
@@ -252,6 +278,13 @@ class Builder:
             self.emit_trap(trap_vars[i % len(trap_vars)])
         for i in range(plan["downgrade"]):
             self.emit_downgrade(downs[i % len(downs)])
+        # Hard negatives: text changes that do NOT cross a category boundary,
+        # split across the pathogenic and benign sides. The real specificity test.
+        for i in range(plan["stable_textvariant"]):
+            if i % 2 == 0:
+                self.emit_hard_negative(action_vars[i % len(action_vars)], "path")
+            else:
+                self.emit_hard_negative(downs[i % len(downs)], "benign")
         # Unchanged: reuse action + downgrade variants (recorded == current).
         stable_pool = action_vars + downs
         for i in range(plan["unchanged_stable"]):

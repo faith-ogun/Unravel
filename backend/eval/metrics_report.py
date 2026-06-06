@@ -53,17 +53,26 @@ under-represented in AlphaMissense's training data.
 
 ## Detection (the Watcher, real `detect_reclassifications`)
 
-This is the headline, largely non-circular measure: the runner exercises the
-actual diff logic against real reclassification directions.
+**Read this honestly.** A reclassification crosses an ACMG category boundary *by
+definition*, and `detect_reclassifications` is a deterministic category diff, so
+flagging the positive cases is correct by construction. The P/R/F1 below is a
+**regression check** that the diff is wired correctly, NOT a measurement of skill;
+do not headline it as accuracy.
 
 {_table([
-    ("Precision", f"{d['precision']}"),
-    ("Recall", f"{d['recall']}"),
-    ("F1", f"{d['f1']}"),
-    ("Specificity", f"{d['specificity']}"),
-    ("False-positive rate", f"{d['false_positive_rate']}"),
-    ("Direction accuracy", f"{d['direction_accuracy']}"),
+    ("Precision / Recall / F1", f"{d['precision']} / {d['recall']} / {d['f1']} (by construction)"),
     ("Confusion (TP / FP / FN / TN)", f"{d['tp']} / {d['fp']} / {d['fn']} / {d['tn']}"),
+])}
+
+The non-tautological detection test is **specificity on hard negatives**: cases
+where the ClinVar *text* changes but the *category* does not (e.g. "Likely
+pathogenic" -> "Pathogenic", or cosmetic benign churn), which must not be flagged.
+This actually exercises the category-collapse logic.
+
+{_table([
+    ("Hard negatives (text change, same category)", f"{d['hard_negatives']['n']}"),
+    ("False reclassifications raised", f"{d['hard_negatives']['false_positives']}"),
+    ("Specificity on hard negatives", f"{d['hard_negatives']['specificity']}"),
 ])}
 
 ## Action safety-floor (deterministic, the auditable gate)
@@ -87,13 +96,16 @@ Action confusion matrix (rows = expected, cols = predicted):
 
 ## Honest framing for the writeup
 
-- Lead with **detection precision / recall / F1**, **withhold-recall**, and
-  **zero dangerous escalations**.
+- Do NOT headline the detection P/R/F1 = 1.0: it is true by construction
+  (a deterministic category diff over constructed inputs), a regression check.
+- Lead instead with the genuinely non-tautological results: **specificity on
+  hard negatives** (the system ignores cosmetic ClinVar text changes), the
+  **withhold-recall** and **zero dangerous escalations** safety properties, the
+  **calibration** (anchors reproduced to 0.0001; predictor-alone insufficiency on
+  31k real variants), and the **live Adjudicator** decision on the demo cases
+  (`run_adjudication.py`), which is the only independent test of the moat.
 - Describe the cohort as *synthetic patients carrying variants with real ClinVar
   reclassification history* (not real patient data, not clinically validated).
-- Cite the live Adjudicator (`run_adjudication.py`) as the independent check on
-  the decision (the moat), and the calibration analysis (`eval/calibration.py`)
-  for the posterior's honesty.
 """
     return md
 

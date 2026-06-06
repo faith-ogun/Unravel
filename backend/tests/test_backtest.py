@@ -91,6 +91,15 @@ def test_no_dangerous_escalations():
     assert REPORT["action"]["dangerous_escalations"] == 0
 
 
+def test_hard_negative_specificity():
+    # the non-tautological detection test: text changes that don't cross a
+    # category boundary (e.g. "Likely pathogenic" -> "Pathogenic") must not flag
+    hn = REPORT["detection"]["hard_negatives"]
+    assert hn["n"] >= 20, "need a meaningful set of hard negatives"
+    assert hn["false_positives"] == 0
+    assert hn["specificity"] == 1.0
+
+
 def test_action_accuracy_on_cohort():
     assert REPORT["action"]["accuracy"] == 1.0
 

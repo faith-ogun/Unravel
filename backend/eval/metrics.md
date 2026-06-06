@@ -4,24 +4,33 @@
 
 Validation cohort: **667 synthetic FHIR patients** carrying variants
 with real ClinVar reclassification history, scored by the backtest runner
-(`eval/backtest.py`). Scenario mix: {'upgrade_actionable': 102, 'deceased_actionable': 6, 'trap_1star': 30, 'downgrade': 72, 'unchanged_stable': 390}. Of the index patients,
+(`eval/backtest.py`). Scenario mix: {'upgrade_actionable': 102, 'deceased_actionable': 6, 'trap_1star': 30, 'downgrade': 72, 'stable_textvariant': 48, 'unchanged_stable': 342}. Of the index patients,
 **484/600** are of an ancestry
 under-represented in AlphaMissense's training data.
 
 ## Detection (the Watcher, real `detect_reclassifications`)
 
-This is the headline, largely non-circular measure: the runner exercises the
-actual diff logic against real reclassification directions.
+**Read this honestly.** A reclassification crosses an ACMG category boundary *by
+definition*, and `detect_reclassifications` is a deterministic category diff, so
+flagging the positive cases is correct by construction. The P/R/F1 below is a
+**regression check** that the diff is wired correctly, NOT a measurement of skill;
+do not headline it as accuracy.
 
 | Metric | Value |
 |---|---|
-| Precision | 1.0 |
-| Recall | 1.0 |
-| F1 | 1.0 |
-| Specificity | 1.0 |
-| False-positive rate | 0.0 |
-| Direction accuracy | 1.0 |
+| Precision / Recall / F1 | 1.0 / 1.0 / 1.0 (by construction) |
 | Confusion (TP / FP / FN / TN) | 210 / 0 / 0 / 390 |
+
+The non-tautological detection test is **specificity on hard negatives**: cases
+where the ClinVar *text* changes but the *category* does not (e.g. "Likely
+pathogenic" -> "Pathogenic", or cosmetic benign churn), which must not be flagged.
+This actually exercises the category-collapse logic.
+
+| Metric | Value |
+|---|---|
+| Hard negatives (text change, same category) | 48 |
+| False reclassifications raised | 0 |
+| Specificity on hard negatives | 1.0 |
 
 ## Action safety-floor (deterministic, the auditable gate)
 
@@ -49,10 +58,13 @@ Action confusion matrix (rows = expected, cols = predicted):
 
 ## Honest framing for the writeup
 
-- Lead with **detection precision / recall / F1**, **withhold-recall**, and
-  **zero dangerous escalations**.
+- Do NOT headline the detection P/R/F1 = 1.0: it is true by construction
+  (a deterministic category diff over constructed inputs), a regression check.
+- Lead instead with the genuinely non-tautological results: **specificity on
+  hard negatives** (the system ignores cosmetic ClinVar text changes), the
+  **withhold-recall** and **zero dangerous escalations** safety properties, the
+  **calibration** (anchors reproduced to 0.0001; predictor-alone insufficiency on
+  31k real variants), and the **live Adjudicator** decision on the demo cases
+  (`run_adjudication.py`), which is the only independent test of the moat.
 - Describe the cohort as *synthetic patients carrying variants with real ClinVar
   reclassification history* (not real patient data, not clinically validated).
-- Cite the live Adjudicator (`run_adjudication.py`) as the independent check on
-  the decision (the moat), and the calibration analysis (`eval/calibration.py`)
-  for the posterior's honesty.

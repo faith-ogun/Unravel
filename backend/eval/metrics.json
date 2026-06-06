@@ -10,7 +10,8 @@
       "deceased_actionable": 6,
       "trap_1star": 30,
       "downgrade": 72,
-      "unchanged_stable": 390
+      "stable_textvariant": 48,
+      "unchanged_stable": 342
     },
     "underrepresented_ancestry": 484,
     "cascade_relatives_total": 67,
@@ -18,7 +19,8 @@
       "upgrade_actionable": 108,
       "downgrade": 72,
       "trap_1star": 30,
-      "unchanged_stable": 390
+      "stable_textvariant": 48,
+      "unchanged_stable": 342
     }
   },
   "detection": {
@@ -31,7 +33,14 @@
     "f1": 1.0,
     "specificity": 1.0,
     "false_positive_rate": 0.0,
-    "direction_accuracy": 1.0
+    "direction_accuracy": 1.0,
+    "hard_negatives": {
+      "n": 48,
+      "false_positives": 0,
+      "specificity": 1.0,
+      "note": "text changes that do not cross a category boundary; the real specificity test"
+    },
+    "positives_note": "Reclassification positives cross a category boundary by construction; P/R/F1 here is a deterministic regression check, not an accuracy measurement."
   },
   "action": {
     "confusion": {
