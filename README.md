@@ -208,7 +208,7 @@ Validated for scale against a **600-patient synthetic FHIR cohort carrying varia
 
 - **Detection specificity:** across **48 hard negatives** where the ClinVar *text* changes but the *category* does not (e.g. "Likely pathogenic" → "Pathogenic"), the Watcher raises **zero** false reclassifications. (Detecting genuine category-crossing reclassifications is a deterministic diff, correct by construction, so we report that as a regression check, not accuracy.)
 - **Safety floor:** withhold-recall **1.0** on the 1-star traps, and **zero dangerous escalations**, a safety regression check.
-- **pytest suite: 877 tests** (engine, tools, and the parametric backtest), including the calibration anchors, the 1-star withhold, the next-best-evidence tip-over, and one assertion per cohort patient for detection and action.
+- **pytest suite: 83 test functions, 891 cases** (the backtest parametrises detection and action over all 600 cohort patients), covering the calibration anchors, the 1-star withhold, the next-best-evidence tip-over, and the Day-5 agents (planner, cascade, steward).
 
 > Honest framing: the cohort is *synthetic patients carrying real variants*, not real patient data, and is not clinically validated. The deterministic action floor's scores are reported as a safety regression check; the moat (grounded reasoning over discordant evidence) is validated by the live Adjudicator.
 
@@ -225,7 +225,7 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env                       # set GOOGLE_CLOUD_PROJECT
 PYTHONPATH=. python scripts/seed_registry.py   # seed the FHIR cohort into Firestore
-PYTHONPATH=. python -m pytest tests/ -q        # 876 tests
+PYTHONPATH=. python -m pytest tests/ -q        # 891 cases (83 test functions)
 PYTHONPATH=. uvicorn server:app --reload --port 8000   # serve the API
 
 # Frontend: React + Vite SPA (proxies /api to :8000)
