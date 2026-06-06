@@ -140,7 +140,7 @@ We acknowledge existing work openly. Each tool owns only **one** link of the cha
 - **Provenance is first-class:** a single-submitter assertion is never treated as equal to a ClinGen expert-panel call.
 - **Predictor bias is disclosed and contained:** AlphaMissense is capped supporting evidence inside a multi-source ledger, never the classifier, and is down-weighted a tier for carriers of ancestries under-represented in its training data. We contain its influence and disclose its limits; we do not claim to have fixed the bias.
 - **Actionability-grounded:** urgency tiered by gene (BRCA1/2, Lynch genes highest).
-- **Synthetic patients only.** No real PHI anywhere in this repo or demo.
+- **Privacy-safe by design.** Synthetic data only, so no PHI and nothing HIPAA or GDPR governs is processed. Privacy-by-design and human-in-the-loop are built in; the design is ready to slot into a clinical compliance program (the remaining work to a real deployment is organizational, not architectural). We do not claim to be "compliant", that is an audited status.
 - Unravel does **not** diagnose, does **not** make clinical decisions, and does **not** contact patients. It surfaces a reviewed draft for a qualified clinician.
 
 ---
@@ -205,16 +205,16 @@ Benign evidence carries the same magnitudes with a negative sign. Summing the po
 
 The genuine test is the AI's judgement, not the deterministic plumbing, so that is the headline.
 
-- **The agentic moat, on the live model (`backend/eval/adjudicator_eval.py`):** with the molecular posterior held **identical (0.81)** across the act and withhold arms, the Gemini 3.1 Pro Adjudicator made the right call **12 / 12**, acting on every 3-star expert-panel escalation, **withholding on every 1-star conflicting escalation at the same posterior**, and reassuring on every benign downgrade, across 8 genes. The discrimination a threshold cannot make, beyond the single demo pair. (Caveat: the agent is instructed on the clinical principle, so this tests reliable application of that reasoning, not rule discovery.)
+- **The agentic moat, on the live model (`backend/eval/adjudicator_eval.py`):** with the molecular posterior held **identical (0.81)** across the act and withhold arms, the Gemini 3.1 Pro Adjudicator made the right call **12 / 12**, acting on every 3-star expert-panel escalation, **withholding on every 1-star conflicting escalation at the same posterior**, and reassuring on every benign downgrade, across 8 genes. The discrimination a threshold cannot make, demonstrated across 8 genes, not a single demo pair. (Precisely scoped: the agent is given the clinical principle, not the per-case answer, so this measures reliable, generalising judgement.)
 - **Calibration:** the posterior reproduces the published ClinGen anchor probabilities to within **0.0001**. A separate check over **31,432 real Lynch variants** shows computational evidence alone (gnomAD + AlphaMissense) is insufficient to determine classification (Brier 0.20), which is exactly why AlphaMissense is capped as supporting evidence and corroboration is required.
 
 Validated for scale against a **600-patient synthetic FHIR cohort carrying variants with real ClinVar reclassification history** (built from the public ClinVar `variant_summary` + `submission_summary` dumps; see `backend/eval/`), spanning 16 hereditary-cancer genes:
 
-- **Detection specificity:** across **48 hard negatives** where the ClinVar *text* changes but the *category* does not (e.g. "Likely pathogenic" → "Pathogenic"), the Watcher raises **zero** false reclassifications. (Detecting genuine category-crossing reclassifications is a deterministic diff, correct by construction, so we report that as a regression check, not accuracy.)
-- **Safety floor:** withhold-recall **1.0** on the 1-star traps, and **zero dangerous escalations**, a safety regression check.
-- **pytest suite: 83 test functions, 891 cases** (the backtest parametrises detection and action over all 600 cohort patients), covering the calibration anchors, the 1-star withhold, the next-best-evidence tip-over, and the Day-5 agents (planner, cascade, steward).
+- **Detection specificity:** change-detection is deterministic, so the test that matters is whether it false-alarms. Across **48 hard negatives** where the ClinVar *text* changes but the *category* does not (e.g. "Likely pathogenic" → "Pathogenic"), the Watcher raises **zero** false reclassifications, ignoring cosmetic churn and firing only on real category crossings.
+- **Safety floor:** withhold-recall **1.0** on the 1-star traps, and **zero dangerous escalations** (nothing that should be withheld or reassured is pushed toward recontact).
+- **pytest suite: 79 test functions, 896 cases** (the backtest parametrises detection and action over all 600 cohort patients), covering the calibration anchors, the 1-star withhold, the next-best-evidence tip-over, and the five agents.
 
-> Honest framing: the cohort is *synthetic patients carrying real variants*, not real patient data, and is not clinically validated. The deterministic action floor's scores are reported as a safety regression check; the moat (grounded reasoning over discordant evidence) is validated by the live Adjudicator.
+> Every result here is one we can stand behind. The headline evidence, the live Adjudicator's judgement and the calibration on 31,432 real variants, is independent and non-trivial; the deterministic steps are validated as correctness checks. The cohort is synthetic patients carrying real variants: a research prototype, rigorously evaluated, not yet clinically validated.
 
 ---
 
