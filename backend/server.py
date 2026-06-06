@@ -14,11 +14,13 @@ Run (from backend/, with PYTHONPATH so `unravel` imports):
     PYTHONPATH=. .venv/bin/uvicorn server:app --reload --port 8000
 """
 
+import json
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 load_dotenv(Path(__file__).parent / ".env")
@@ -27,7 +29,8 @@ app = FastAPI(title="Unravel API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
+                   "https://unravel-ra.web.app", "https://unravel-ra.firebaseapp.com"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -58,6 +61,25 @@ def run_loop(patient: str) -> dict:
         return _run(patient)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/run-loop-stream")
+async def run_loop_stream(patient: str):
+    """Stream the five-agent loop as Server-Sent Events, one per agent as it
+    completes, so the UI lights up node by node in real time."""
+    from unravel.agents import run_loop_events_async
+
+    async def gen():
+        try:
+            async for item in run_loop_events_async(patient):
+                yield f"data: {json.dumps(item)}\n\n"
+        except Exception as e:  # surface the error to the client, then end
+            yield f"data: {json.dumps({'error': f'{type(e).__name__}: {e}'})}\n\n"
+        yield "data: {\"done\": true}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive",
+    })
 
 
 @app.get("/api/pedigree")

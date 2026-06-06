@@ -173,6 +173,39 @@ export async function runLoop(patientId: string): Promise<LoopResult> {
   return res.json();
 }
 
+// Streaming: the five agents emit one event each as they finish, so the UI can
+// light up node by node. Streams direct from Cloud Run (CORS) to avoid CDN
+// buffering on the Firebase /api rewrite. In dev, falls back to same-origin.
+const STREAM_ORIGIN =
+  typeof window !== 'undefined' && window.location.hostname.endsWith('web.app')
+    ? 'https://unravel-api-306681961993.us-central1.run.app'
+    : '';
+
+export interface LoopStreamEvent {
+  agent?: string; node?: string; key?: string;
+  data?: Record<string, unknown>;
+  fhir_drafts?: Record<string, unknown>[];
+  error?: string; done?: boolean;
+}
+
+export function runLoopStream(
+  patientId: string,
+  onEvent: (e: LoopStreamEvent) => void,
+  onDone: (err?: string) => void,
+): () => void {
+  const url = `${STREAM_ORIGIN}/api/run-loop-stream?patient=${encodeURIComponent(patientId)}`;
+  const es = new EventSource(url);
+  es.onmessage = (m) => {
+    let e: LoopStreamEvent;
+    try { e = JSON.parse(m.data); } catch { return; }
+    if (e.done) { es.close(); onDone(e.error); return; }
+    if (e.error) { es.close(); onDone(e.error); return; }
+    onEvent(e);
+  };
+  es.onerror = () => { es.close(); onDone('stream error'); };
+  return () => es.close();
+}
+
 export async function adjudicate(patientId: string): Promise<Adjudication> {
   const res = await fetch(`${BASE}/adjudicate?patient=${encodeURIComponent(patientId)}`, {
     method: 'POST',

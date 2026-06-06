@@ -223,3 +223,45 @@ async def _run_async(patient_id: str) -> dict:
 def run_loop(patient_id: str) -> dict:
     """Run the full five-agent ADK loop on one patient and gather every output."""
     return asyncio.run(_run_async(patient_id))
+
+
+# step metadata for the live stream: agent name -> (UI node, state key)
+_STEP = {
+    "watcher": ("Watcher", "watch"),
+    "adjudicator": ("Adjudicator", "verdict"),
+    "resolution_planner": ("Planner", "plan"),
+    "cascade_coordinator": ("Cascade", "cascade"),
+    "steward": ("Steward", "steward"),
+}
+
+
+async def run_loop_events_async(patient_id: str):
+    """Run the loop and yield one event per agent AS IT COMPLETES, so the UI can
+    light up each node in real time (Watcher -> Adjudicator -> the parallel
+    fan-out) instead of waiting for the whole run."""
+    session_service = InMemorySessionService()
+    await session_service.create_session(
+        app_name=APP, user_id="clinic", session_id=patient_id,
+        state={"patient_id": patient_id})
+    runner = Runner(agent=root_agent, app_name=APP, session_service=session_service)
+    message = types.Content(role="user", parts=[types.Part(
+        text=f"Run the variant-reclassification loop for patient {patient_id}.")])
+
+    emitted: set[str] = set()
+    async for event in runner.run_async(user_id="clinic", session_id=patient_id,
+                                        new_message=message):
+        author = getattr(event, "author", None)
+        if author not in _STEP or author in emitted:
+            continue
+        if not event.is_final_response() or not (event.content and event.content.parts):
+            continue
+        text = event.content.parts[0].text
+        if not text:
+            continue
+        emitted.add(author)
+        node, key = _STEP[author]
+        data = _parse(text)
+        payload = {"agent": author, "node": node, "key": key, "data": data}
+        if author == "cascade_coordinator":
+            payload["fhir_drafts"] = _fhir_drafts(data)
+        yield payload

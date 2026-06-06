@@ -4,9 +4,9 @@ import {
   List, Network, UserPlus,
 } from 'lucide-react';
 import {
-  getCohort, getFreshness, resync, runLoop, getStructural,
+  getCohort, getFreshness, resync, runLoopStream, getStructural,
   type CohortRow, type Feed, type Adjudication, type ResolutionPlan,
-  type CascadeResult, type StewardResult, type Structural,
+  type CascadeResult, type StewardResult, type Structural, type LoopStreamEvent,
 } from '../api';
 import PedigreeView from '../dash/PedigreeView';
 import GraphView from '../dash/GraphView';
@@ -65,7 +65,6 @@ const tag = (fg: string, bg: string): React.CSSProperties => ({
 const eyebrow: React.CSSProperties = {
   fontFamily: 'var(--mono)', fontSize: '.66rem', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--faint)',
 };
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default function AppDashboard() {
   const [cohort, setCohort] = useState<CohortRow[] | null>(null);
@@ -117,69 +116,83 @@ export default function AppDashboard() {
     }
   }
 
-  async function runWatch(target?: CohortRow) {
+  function runWatch(target?: CohortRow) {
     const r = target ?? sel;
     if (!r || running) return;
     setRunning(true);
     setAdj(null); setPlan(null); setCasc(null); setStew(null); setLog([]);
 
-    setNode('Watcher', 'running');
-    push('Watcher', `${r.gene} ${r.hgvs_c}: registry "${r.recorded_class}" vs ClinVar "${r.current_class}" (${r.review_stars}★) — running the five-agent loop on Gemini…`, 'info');
+    // the live topology: Watcher -> Adjudicator -> fan-out (Planner ‖ Cascade ‖ Steward)
+    setNodes({ Watcher: 'running', Adjudicator: 'idle', Planner: 'idle', Cascade: 'idle', Steward: 'idle' });
+    push('Watcher', `${r.gene} ${r.hgvs_c}: registry "${r.recorded_class}" vs ClinVar "${r.current_class}" (${r.review_stars}★) — five Gemini agents reasoning…`, 'info');
 
-    let loop;
-    try {
-      loop = await runLoop(r.patient_id);
-    } catch (e) {
-      push('Watcher', `error: ${e}`, 'warn'); setNode('Watcher', 'held'); setRunning(false); return;
-    }
+    let verdictActionable = false;
+    const fanOutStarted = { v: false };
+    const startFanOut = () => {
+      if (fanOutStarted.v) return;
+      fanOutStarted.v = true;
+      setNodes((n) => ({ ...n, Planner: 'running', Cascade: verdictActionable ? 'running' : 'held', Steward: 'running' }));
+      if (!verdictActionable) push('Cascade', 'held — verdict not actionable, no family recontact drafted', 'warn');
+    };
 
-    // Watcher
-    push('Watcher', loop.watch?.summary || 'change triaged for adjudication', 'ok');
-    setNode('Watcher', 'done'); await sleep(250);
+    const onEvent = (e: LoopStreamEvent) => {
+      const d = (e.data || {}) as Record<string, any>;
+      if (e.agent === 'watcher') {
+        push('Watcher', d.summary || 'change triaged for adjudication', 'ok');
+        setNode('Watcher', 'done'); setNode('Adjudicator', 'running');
+      } else if (e.agent === 'adjudicator') {
+        verdictActionable = d.action === 'draft_recontact' && !d.withheld;
+        setAdj({ patient_id: r.patient_id, reclassified: true, verdict: { triage: d.triage, action: d.action, withheld: !!d.withheld, rationale: d.rationale, key_evidence: [] } } as Adjudication);
+        push('Adjudicator', `verdict: ${d.triage} · ${d.action}${d.withheld ? ' · WITHHELD' : ''}`, d.withheld ? 'warn' : 'ok');
+        setNode('Adjudicator', 'done');
+        startFanOut();
+        if (r.hgvs_p) getStructural(r.gene, r.hgvs_p).then(setStruc).catch(() => {});
+      } else if (e.agent === 'resolution_planner') {
+        startFanOut();
+        setPlan({ recommendation: d.recommendation || '', steps: [] } as unknown as ResolutionPlan);
+        push('Planner', d.recommendation || 'no resolving experiment found', 'ok');
+        setNode('Planner', 'done');
+      } else if (e.agent === 'cascade_coordinator') {
+        startFanOut();
+        if (d.applicable) {
+          const drafts = ((d.drafts as any[]) || []).map((x, i) => ({
+            for: x.recipient, patient_id: x.recipient, relationship: x.relationship,
+            communication: (e.fhir_drafts || [])[i] as Record<string, unknown> | undefined,
+            risk_assessment: undefined,
+          }));
+          setCasc({ variant: `${r.gene} ${r.hgvs_c}`, carriers: drafts.length, relatives: 0,
+            deceased_carriers: [], drafts, note: 'Draft-only (intent: proposal, status: draft). A clinician reviews and sends.' } as CascadeResult);
+          push('Cascade', `drafted ${drafts.length} clinician-facing recontact proposal(s)`, 'ok');
+          setNode('Cascade', 'done');
+        } else {
+          setNode('Cascade', 'held');
+        }
+      } else if (e.agent === 'steward') {
+        startFanOut();
+        const routes = (d.ethics_routes as any[]) || [];
+        setStew({ variant: `${r.gene} ${r.hgvs_c}`, has_deceased_carrier: routes.length > 0,
+          ethics_routes: routes.map((x: any) => ({ deceased: x.deceased, route: x.route || 'ethics / next-of-kin consent pathway', rationale: '', living_relatives: x.living_relatives || [] })),
+          give_back: { variant: `${r.gene} ${r.hgvs_c}`, submitted_classification: (d.give_back as any)?.classification || r.current_class || '', evidence: [], gene: r.gene } } as StewardResult);
+        if (routes.length > 0) push('Steward', 'deceased carrier — routed to ethics / next-of-kin pathway', 'warn');
+        else push('Steward', 'drafted ClinVar give-back submission', 'ok');
+        setNode('Steward', 'done');
+      }
+    };
 
-    // Adjudicator (the moat)
-    setNode('Adjudicator', 'running'); await sleep(220);
-    const v = loop.verdict;
-    setAdj({ patient_id: r.patient_id, reclassified: true, verdict: { triage: v.triage, action: v.action, withheld: v.withheld, rationale: v.rationale, key_evidence: [] } } as Adjudication);
-    push('Adjudicator', `verdict: ${v.triage} · ${v.action}${v.withheld ? ' · WITHHELD' : ''}`, v.withheld ? 'warn' : 'ok');
-    setNode('Adjudicator', 'done'); await sleep(250);
+    const onDone = (err?: string) => {
+      if (err && err !== 'stream error') push('Watcher', `error: ${err}`, 'warn');
+      // any node still 'running' (e.g. a held branch) settles
+      setNodes((n) => {
+        const out = { ...n };
+        (['Planner', 'Cascade', 'Steward'] as Agent[]).forEach((a) => {
+          if (out[a] === 'running') out[a] = 'done';
+        });
+        return out;
+      });
+      setRunning(false);
+    };
 
-    // fan-out: Planner ‖ Cascade ‖ Steward (ran in parallel server-side)
-    setNode('Planner', 'running'); await sleep(180);
-    setPlan({ recommendation: loop.plan?.recommendation || '', steps: [] } as unknown as ResolutionPlan);
-    push('Planner', loop.plan?.recommendation || 'no resolving experiment found', 'ok');
-    setNode('Planner', 'done'); await sleep(180);
-
-    const actionable = v.action === 'draft_recontact' && !v.withheld && !!loop.cascade?.applicable;
-    if (actionable) {
-      setNode('Cascade', 'running'); await sleep(180);
-      const drafts = (loop.cascade.drafts || []).map((d, i) => ({
-        for: d.recipient, patient_id: d.recipient, relationship: d.relationship,
-        communication: loop.fhir_drafts[i] as Record<string, unknown> | undefined,
-        risk_assessment: undefined,
-      }));
-      setCasc({ variant: `${r.gene} ${r.hgvs_c}`, carriers: drafts.length, relatives: 0,
-        deceased_carriers: [], drafts, note: 'Draft-only (intent: proposal, status: draft). A clinician reviews and sends.' } as CascadeResult);
-      push('Cascade', `drafted ${drafts.length} clinician-facing recontact proposal(s)`, 'ok');
-      setNode('Cascade', 'done');
-    } else {
-      setNode('Cascade', 'held');
-      push('Cascade', 'held — verdict not actionable, no family recontact drafted', 'warn');
-    }
-    await sleep(180);
-
-    // Steward
-    setNode('Steward', 'running'); await sleep(180);
-    const routes = loop.steward?.ethics_routes || [];
-    setStew({ variant: `${r.gene} ${r.hgvs_c}`, has_deceased_carrier: routes.length > 0,
-      ethics_routes: routes.map((e) => ({ deceased: e.deceased, route: e.route || 'ethics / next-of-kin consent pathway', rationale: '', living_relatives: e.living_relatives || [] })),
-      give_back: { variant: `${r.gene} ${r.hgvs_c}`, submitted_classification: loop.steward?.give_back?.classification || r.current_class || '', evidence: [], gene: r.gene } } as StewardResult);
-    if (routes.length > 0) push('Steward', 'deceased carrier — routed to ethics / next-of-kin pathway', 'warn');
-    else push('Steward', 'drafted ClinVar give-back submission', 'ok');
-    setNode('Steward', 'done');
-
-    if (r.hgvs_p) getStructural(r.gene, r.hgvs_p).then(setStruc).catch(() => {});
-    setRunning(false);
+    runLoopStream(r.patient_id, onEvent, onDone);
   }
 
   // deep link: /app?patient=<id>&run=1 selects a case and optionally runs the loop
