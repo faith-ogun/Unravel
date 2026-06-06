@@ -18,7 +18,7 @@ what the browser shows is the real engine, not a fixture.
 from __future__ import annotations
 
 from . import registry
-from .acmg import score_posterior
+from .acmg import posterior_breakdown, score_posterior
 from .detection import _gid, detect_reclassifications
 from .evidence import EVIDENCE_VIEW, build_evidence_ledger
 
@@ -115,6 +115,7 @@ def cohort_overview(client=None) -> list[dict]:
             "am_pathogenicity": (row or {}).get("am_pathogenicity"),
             "am_class": (row or {}).get("am_class"),
             "cited": post.cited_lines(),
+            "breakdown": posterior_breakdown(ctx.ledger),
         })
     # most clinically interesting first: reclassified, then by posterior
     out.sort(key=lambda x: (not x["reclassified"], -x["posterior"]))

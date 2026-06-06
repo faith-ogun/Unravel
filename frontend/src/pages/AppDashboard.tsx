@@ -12,6 +12,7 @@ import PedigreeView from '../dash/PedigreeView';
 import GraphView from '../dash/GraphView';
 import AddPatientView from '../dash/AddPatientView';
 import StructureViewer from '../dash/StructureViewer';
+import PosteriorBreakdown from '../dash/PosteriorBreakdown';
 
 type View = 'watchlist' | 'pedigree' | 'graph' | 'add';
 const NAV: { id: View; label: string; icon: typeof List }[] = [
@@ -350,6 +351,11 @@ export default function AppDashboard() {
                     </div>
                   </div>
                 </div>
+                {sel.breakdown && (
+                  <div style={{ marginTop: '1rem', paddingTop: '.9rem', borderTop: '1px solid var(--line)' }}>
+                    <PosteriorBreakdown breakdown={sel.breakdown} />
+                  </div>
+                )}
               </div>
 
               {adj?.verdict && (

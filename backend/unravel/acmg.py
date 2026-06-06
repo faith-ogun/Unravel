@@ -295,3 +295,42 @@ def score_posterior(ledger: Ledger) -> PosteriorResult:
         band=classify(points),
         contributions=contributions,
     )
+
+
+def posterior_breakdown(ledger: Ledger) -> dict:
+    """The transparent points -> odds -> posterior waterfall for a ledger.
+
+    Shows exactly "what goes into what": starting from the prior, each cited
+    evidence item moves the running point total, the combined odds, and the
+    posterior. This is what the UI renders so a judge can watch a verdict build
+    from evidence rather than appear as a number. Pure; mirrors `score_posterior`.
+    """
+    result = score_posterior(ledger)
+    steps: list[dict] = []
+    cumulative = 0
+    for c in result.contributions:
+        cumulative += c.points
+        steps.append({
+            "code": c.code,
+            "points": c.points,
+            "source": c.source,
+            "detail": c.detail,
+            "cumulative_points": cumulative,
+            "cumulative_posterior": round(posterior_at(cumulative), 4),
+        })
+    return {
+        "variant": result.variant,
+        "prior": PRIOR_P,
+        "prior_posterior": round(posterior_at(0), 4),
+        "steps": steps,
+        "total_points": result.points,
+        "odds_path": round(C ** result.points, 3),
+        "posterior": round(result.posterior, 4),
+        "band": result.band.value,
+        "points_to_actionable": result.points_to_actionable,
+        "is_actionable": result.is_actionable,
+        "actionable_line": {
+            "points": ACTIONABLE_POINTS,
+            "posterior": round(posterior_at(ACTIONABLE_POINTS), 4),
+        },
+    }

@@ -34,6 +34,29 @@ export async function runWatch(year: number): Promise<WatchResult> {
 
 // --- the real engine ---------------------------------------------------------
 
+export interface BreakdownStep {
+  code: string;
+  points: number;
+  source: string;
+  detail: string;
+  cumulative_points: number;
+  cumulative_posterior: number;
+}
+
+export interface PosteriorBreakdown {
+  variant: string;
+  prior: number;
+  prior_posterior: number;
+  steps: BreakdownStep[];
+  total_points: number;
+  odds_path: number;
+  posterior: number;
+  band: string;
+  points_to_actionable: number;
+  is_actionable: boolean;
+  actionable_line: { points: number; posterior: number };
+}
+
 export interface CohortRow {
   patient_id: string;
   patient_name: string;
@@ -56,6 +79,7 @@ export interface CohortRow {
   am_pathogenicity: number | null;
   am_class: string | null;
   cited: string[];
+  breakdown: PosteriorBreakdown;
 }
 
 export interface Verdict {
