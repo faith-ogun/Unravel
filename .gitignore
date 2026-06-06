@@ -1,6 +1,9 @@
 # Internal strategy / planning notes (kept private, not for public repo)
 metadata/
 
+# Devpost submission drafts (private working copies, not for public repo)
+devpost/
+
 # Reference papers (copyrighted whitepapers + generated md/json), kept local
 refs/
 
