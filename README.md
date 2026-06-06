@@ -199,13 +199,16 @@ Benign evidence carries the same magnitudes with a negative sign. Summing the po
 
 ## Evaluation
 
-Validated against a **600-patient synthetic FHIR cohort carrying variants with real ClinVar reclassification history** (built from the public ClinVar `variant_summary` + `submission_summary` dumps; see `backend/eval/`). The cohort spans 16 hereditary-cancer genes and a controlled mix of upgrades, downgrades, 1-star traps, deceased probands, and cascade families.
+The genuine test is the AI's judgement, not the deterministic plumbing, so that is the headline.
 
-- **Detection specificity (the meaningful test):** across **48 hard negatives** where the ClinVar *text* changes but the *category* does not (e.g. "Likely pathogenic" → "Pathogenic", cosmetic benign churn), the Watcher raises **zero** false reclassifications. (Detecting the genuine reclassifications is a deterministic category diff and correct by construction, so we report that as a regression check, not as accuracy.)
-- **Safety floor:** withhold-recall **1.0** on the 1-star traps, and **zero dangerous escalations** (nothing that should be withheld or reassured is ever pushed toward family recontact).
-- **Calibration:** the posterior reproduces the published ClinGen anchor probabilities to within **0.0001**. A separate check over **31,432 real Lynch variants** shows that computational evidence alone (gnomAD + AlphaMissense) is insufficient to determine classification (Brier 0.20), which is exactly why AlphaMissense is capped as supporting evidence and corroboration is required.
-- **pytest suite: 876 tests** (engine, tools, and the parametric backtest), including the calibration anchors, the 1-star withhold, the next-best-evidence tip-over, and one assertion per cohort patient for detection and action.
-- The live Gemini Adjudicator is validated independently on the demo cases via `backend/scripts/run_adjudication.py`.
+- **The agentic moat, on the live model (`backend/eval/adjudicator_eval.py`):** with the molecular posterior held **identical (0.81)** across the act and withhold arms, the Gemini 3.1 Pro Adjudicator made the right call **12 / 12**, acting on every 3-star expert-panel escalation, **withholding on every 1-star conflicting escalation at the same posterior**, and reassuring on every benign downgrade, across 8 genes. The discrimination a threshold cannot make, beyond the single demo pair. (Caveat: the agent is instructed on the clinical principle, so this tests reliable application of that reasoning, not rule discovery.)
+- **Calibration:** the posterior reproduces the published ClinGen anchor probabilities to within **0.0001**. A separate check over **31,432 real Lynch variants** shows computational evidence alone (gnomAD + AlphaMissense) is insufficient to determine classification (Brier 0.20), which is exactly why AlphaMissense is capped as supporting evidence and corroboration is required.
+
+Validated for scale against a **600-patient synthetic FHIR cohort carrying variants with real ClinVar reclassification history** (built from the public ClinVar `variant_summary` + `submission_summary` dumps; see `backend/eval/`), spanning 16 hereditary-cancer genes:
+
+- **Detection specificity:** across **48 hard negatives** where the ClinVar *text* changes but the *category* does not (e.g. "Likely pathogenic" → "Pathogenic"), the Watcher raises **zero** false reclassifications. (Detecting genuine category-crossing reclassifications is a deterministic diff, correct by construction, so we report that as a regression check, not accuracy.)
+- **Safety floor:** withhold-recall **1.0** on the 1-star traps, and **zero dangerous escalations**, a safety regression check.
+- **pytest suite: 877 tests** (engine, tools, and the parametric backtest), including the calibration anchors, the 1-star withhold, the next-best-evidence tip-over, and one assertion per cohort patient for detection and action.
 
 > Honest framing: the cohort is *synthetic patients carrying real variants*, not real patient data, and is not clinically validated. The deterministic action floor's scores are reported as a safety regression check; the moat (grounded reasoning over discordant evidence) is validated by the live Adjudicator.
 
