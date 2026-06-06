@@ -230,8 +230,14 @@ class Builder:
         self.rng.shuffle(ups)
         self.rng.shuffle(downs)
         # Reserve disjoint variant subsets so each gid has ONE warehouse state.
-        trap_vars = ups[:max(1, len(ups) // 4)]
-        action_vars = ups[len(trap_vars):]
+        # Traps are overridden to a 1-star conflicting state regardless of their
+        # real review; actionable variants keep their REAL review and must be 2+
+        # star, so the safety floor's "act on 2+ star escalation" boundary lines
+        # up with the labels (a real upgrade that currently sits at 1-star is not
+        # yet actionable, and is left out of the actionable pool by design).
+        n_trap = max(2, len(ups) // 4)
+        trap_vars = ups[:n_trap]
+        action_vars = [u for u in ups[n_trap:] if u.get("current_stars", 3) >= 2] or ups[n_trap:]
 
         plan = {
             "upgrade_actionable": round(self.n * 0.18),
