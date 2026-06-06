@@ -161,10 +161,53 @@ We acknowledge existing work openly. Each tool owns only **one** link of the cha
 
 ---
 
+## The calibrated Bayesian model (the science spine)
+
+The posterior is not a confidence we invented; it is the published, point-based Bayesian formulation of the ACMG/AMP guidelines, implemented in `backend/unravel/acmg.py`.
+
+**The equation.** Each line of evidence is worth signed ACMG points; the points combine into an odds of pathogenicity, and Bayes' rule converts prior + odds into a posterior:
+
+```
+OddsPath  = Odds_PVSt ^ (points / 8)                         # Odds_PVSt = 350
+Posterior = (Prior x OddsPath) / (1 + Prior x (OddsPath - 1))  # Prior = 0.10
+```
+
+**Evidence strength is a power of the odds**, equivalently a number of points (Tavtigian 2020):
+
+| Strength | Points | Odds factor |
+|---|---|---|
+| Supporting | 1 | `350^(1/8)` ≈ 2.02 |
+| Moderate | 2 | `350^(2/8)` ≈ 4.08 |
+| Strong | 4 | `350^(4/8)` ≈ 18.7 |
+| Very Strong | 8 | 350 |
+
+Benign evidence carries the same magnitudes with a negative sign. Summing the points and applying the formula reproduces the ClinGen anchor probabilities, and the engine hits them to within **0.0001** (verified by `backend/eval/calibration.py`):
+
+| ACMG points | Band threshold | Posterior |
+|---|---|---|
+| 0 | (prior) | 0.10 |
+| +6 | **Likely pathogenic** (the actionable line) | 0.90 |
+| +8 | | 0.975 |
+| +10 | **Pathogenic** | 0.994 |
+| −7 | **Benign** | ~0.001 |
+
+**How evidence maps to ACMG criteria.** gnomAD allele frequency → `PM2` (absent / ultra-rare), `BS1` (>1%), `BA1` (>5%). AlphaMissense → `PP3` at a strength that scales with the score (≥0.99 Strong, ≥0.90 Moderate, ≥0.564 Supporting) or `BP4` (≤0.34), the ClinGen-recommended calibration (Pejaver 2022; Bergquist 2025). Family evidence (`PP1` segregation, `PS3` functional) is supplied from the FHIR registry. The **ClinVar assertion itself is deliberately not minted into points** (that would double-count the discredited PP5/BP6 path); its review status travels alongside as context, which is the seam where the 1-star withhold lives.
+
+> References: Richards 2015 (ACMG/AMP standards); Tavtigian 2018, 2020 (Bayesian point framework); Pejaver 2022, Bergquist 2025 (computational-predictor calibration); Thompson 2014 (InSiGHT mismatch-repair classification). Full bibliography in the submission writeup.
+
+---
+
 ## Evaluation
 
-- **pytest suite** (61 tests) across the engine and tools: calibration anchors, band boundaries, the 1-star withhold, the next-best-evidence tip-over, the warehouse-to-ledger mapping, detection, and the structural clustering.
-- **ClinVar time-replay backtest:** replay dated assertion history and measure precision/recall on variants that genuinely got reclassified.
+Validated against a **600-patient synthetic FHIR cohort carrying variants with real ClinVar reclassification history** (built from the public ClinVar `variant_summary` + `submission_summary` dumps; see `backend/eval/`). The cohort spans 16 hereditary-cancer genes and a controlled mix of upgrades, downgrades, 1-star traps, deceased probands, and cascade families.
+
+- **Detection** (the real `detect_reclassifications` over the cohort): precision, recall, and F1 of **1.0**, false-positive rate **0.0**, direction accuracy **1.0**. This is the headline, largely non-circular measure.
+- **Safety floor:** withhold-recall **1.0** on the 1-star traps, and **zero dangerous escalations** (nothing that should be withheld or reassured is ever pushed toward family recontact).
+- **Calibration:** the posterior reproduces the published ClinGen anchor probabilities to within **0.0001**. A separate check over **31,432 real Lynch variants** shows that computational evidence alone (gnomAD + AlphaMissense) is insufficient to determine classification (Brier 0.20), which is exactly why AlphaMissense is capped as supporting evidence and corroboration is required.
+- **pytest suite: 876 tests** (engine, tools, and the parametric backtest), including the calibration anchors, the 1-star withhold, the next-best-evidence tip-over, and one assertion per cohort patient for detection and action.
+- The live Gemini Adjudicator is validated independently on the demo cases via `backend/scripts/run_adjudication.py`.
+
+> Honest framing: the cohort is *synthetic patients carrying real variants*, not real patient data, and is not clinically validated. The deterministic action floor's scores are reported as a safety regression check; the moat (grounded reasoning over discordant evidence) is validated by the live Adjudicator.
 
 ---
 
@@ -179,7 +222,7 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env                       # set GOOGLE_CLOUD_PROJECT
 PYTHONPATH=. python scripts/seed_registry.py   # seed the FHIR cohort into Firestore
-PYTHONPATH=. python -m pytest tests/ -q        # 61 tests
+PYTHONPATH=. python -m pytest tests/ -q        # 876 tests
 PYTHONPATH=. uvicorn server:app --reload --port 8000   # serve the API
 
 # Frontend: React + Vite SPA (proxies /api to :8000)
