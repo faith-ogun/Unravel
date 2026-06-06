@@ -48,19 +48,19 @@ Unravel runs one tight loop, end to end:
 
 ## The five agents
 
-Genuinely multi-agent (an ADK coordinator pattern), each operating on different data, on a different clock.
+Five **real Gemini LlmAgents** in a genuine ADK multi-agent flow (`backend/unravel/agents.py`): a `SequentialAgent` root runs Watcher → Adjudicator → a `ParallelAgent` **fan-out / gather** of Planner ‖ Cascade ‖ Steward, all sharing **one Session**. Each agent reads the prior agents' outputs from shared state (the Adjudicator's verdict fans out to the three specialists) and calls deterministic **FunctionTools** for the auditable work, the brain/hands split the Google Agents whitepapers prescribe.
 
-| Agent | Model | Clock | Job |
+| Agent | Model | Tools it calls | Job |
 |---|---|---|---|
-| **1. Watcher** (Evidence Surveillance) | Flash-Lite | the *evidence's* clock, wakes on a change | Deterministic, auditable delta-detection vs the VUS registry. **Fivetran is its heartbeat.** |
-| **2. Adjudicator** (Clinical Significance) | 3.1 Pro | fires when the Watcher flags a change | Build the cited ACMG ledger, compute a calibrated posterior, weight review status, **withhold** low-confidence flips. *The moat.* |
-| **3. Resolution Planner** (Next-Best-Evidence) | 3.1 Pro | proactive on warm/hot variants | Rank the next experiment (segregation, tumour MMR-IHC/MSI, functional, splicing) by information value, in ACMG currency. *The never-done core.* |
-| **4. Cascade Coordinator** (Recontact & Fan-out) | 3.1 Pro | only on a confirmed actionable upgrade | Match carriers + at-risk relatives; draft FHIR `Task` / `Communication` / `RiskAssessment` (`intent: proposal`). *The genomics-native wow.* |
-| **5. Steward** (Ethics & Give-back) | 3.1 Pro | edge cases + on resolution | Route deceased-proband cases to an ethics/next-of-kin pathway (never a letter); draft a ClinVar give-back submission. |
+| **1. Watcher** | Flash-Lite | `lookup_reclassification`, `check_feed_freshness` | Triage the detected change: is it worth adjudicating, and why? Fivetran freshness is a tool it can check. |
+| **2. Adjudicator** | 3.1 Pro | `assemble_evidence` | Weigh the cited ACMG ledger + calibrated posterior against review quality, and **withhold** low-confidence flips. *The moat; the critic in the loop.* |
+| **3. Resolution Planner** | 3.1 Pro | `rank_next_experiments` | Recommend the single highest-yield next experiment by information value, in ACMG currency. |
+| **4. Cascade Coordinator** | 3.1 Pro | `find_family` | On an actionable verdict, draft clinician-facing recontact for carriers + at-risk relatives (wrapped in draft FHIR `Communication`, `intent: proposal`). |
+| **5. Steward** | 3.1 Pro | `steward_assessment` | Route deceased-proband cases to an ethics/next-of-kin pathway (never a letter); draft a ClinVar give-back. |
 
-### Why it's an agent, not a cron job
+### Why it's an agent system, not a cron job
 
-Detecting a status flip is deterministic. **Adjudicating it is not.** ClinVar carries conflicting submissions at different review/star levels; expert panels disagree with single-submitter assertions; ontologies mismatch. Deciding whether a VUS has *actually* crossed the actionability threshold, and correctly **withholding** a flip that's only a low-confidence single-submitter assertion, is genuine LLM reasoning. The **rules / AI boundary** is explicit: deterministic code does the diff and gene-tier rules; the Gemini agents do the messy, contradictory, language-heavy adjudication.
+Detecting a status flip is deterministic, so it is a **tool**, not an agent. The judgement is the agentic part: ClinVar carries conflicting submissions at different review/star levels, and deciding whether a VUS has *actually* crossed the actionability threshold, correctly **withholding** a 1-star flip while acting on a 3-star one at the *same* molecular posterior, is genuine LLM reasoning. The boundary is explicit and clean: deterministic FunctionTools do the diff, the posterior math, the FHIR envelope; the five Gemini agents do the messy, contradictory, language-heavy reasoning, with a draft-only human-in-the-loop gate.
 
 ---
 
@@ -73,20 +73,23 @@ Detecting a status flip is deterministic. **Adjudicating it is not.** ClinVar ca
    gnomAD        |--->  FIVETRAN  --->  BigQuery  (unified evidence view)
    AlphaMissense |      GCS connectors          AlphaFold DB (structures)
 
-== AGENT PLANE = ADK multi-agent on Cloud Run =========================
+== AGENT PLANE = five Gemini agents, ADK on Cloud Run ================
+   SequentialAgent (one shared Session)
 
-   WATCHER --> ADJUDICATOR --> RESOLUTION --> CASCADE --> STEWARD
-   flash-lite   3.1 Pro       PLANNER       3.1 Pro    3.1 Pro
-   detect       posterior +   next-best-    draft FHIR  ethics +
-   (data diff)  WITHHOLD      evidence      recontact   ClinVar give-back
-        |       (the moat)        |             |            |
-        v            |            v             v            v
-   BigQuery   FIVETRAN MCP   score_posterior  FHIR R4 registry (Firestore)
-              freshness +                     Patient | Observation |
-              targeted re-sync                FamilyMemberHistory
-              (in the loop)                          |
+   WATCHER  -->  ADJUDICATOR  -->  [ ParallelAgent: fan-out / gather ]
+   flash-lite    pro (moat)            |
+   triage        posterior +           +--> RESOLUTION PLANNER (pro)
+                 WITHHOLD               +--> CASCADE COORDINATOR (pro)
+                 (the critic)           +--> STEWARD (pro)
+
+   agents call FunctionTools (the hands):
+     lookup_reclassification | assemble_evidence (score_posterior) |
+     rank_next_experiments | find_family | Fivetran MCP freshness
+                                                     |
                                                      v
-   React SPA (Firebase Hosting, /api -> Cloud Run)
+   draft FHIR (Firestore: Patient | Observation | FamilyMemberHistory)
+                                                     |
+   React SPA (Firebase Hosting, /api -> Cloud Run)   v
                     <-- clinician REVIEWS and SENDS (draft-only, HITL)
 ```
 
