@@ -39,6 +39,11 @@ _SCHEMA_PATH = re.compile(r"(open-api-definitions/[^'\"]+\.json)")
 
 
 def _secret(name: str) -> str:
+    # On Cloud Run the secrets are mounted as env vars via --set-secrets
+    # (FIVETRAN_API_KEY / FIVETRAN_API_SECRET); locally we fall back to gcloud.
+    env_val = os.environ.get(name.upper().replace("-", "_"))
+    if env_val:
+        return env_val
     out = subprocess.run(
         ["gcloud", "secrets", "versions", "access", "latest",
          f"--secret={name}", f"--project={PROJECT}"],
