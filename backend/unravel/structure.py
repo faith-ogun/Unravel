@@ -27,9 +27,15 @@ from pathlib import Path
 
 import requests
 
+import tempfile
+
 _STAGING = Path(__file__).resolve().parent.parent / "_staging"
-_RESIDUE_AM = _STAGING / "alphamissense_residue.csv"
-_AF_CACHE = _STAGING / "alphafold"
+# Per-residue AlphaMissense ships as committed package data (so it is in the
+# Cloud Run image); fall back to _staging for locally regenerated copies.
+_PACKAGED_AM = Path(__file__).resolve().parent / "data" / "alphamissense_residue.csv"
+_RESIDUE_AM = _PACKAGED_AM if _PACKAGED_AM.exists() else _STAGING / "alphamissense_residue.csv"
+# AlphaFold models cache to _staging locally, or a writable temp dir on Cloud Run.
+_AF_CACHE = (_STAGING / "alphafold") if _STAGING.exists() else Path(tempfile.gettempdir()) / "unravel-alphafold"
 _AF_API_URL = "https://alphafold.ebi.ac.uk/api/prediction/{uniprot}"
 _AF_ENTRY_URL = "https://alphafold.ebi.ac.uk/entry/{uniprot}"
 
