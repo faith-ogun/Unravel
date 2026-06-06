@@ -41,6 +41,11 @@ COLLECTIONS = ("Patient", "Observation", "FamilyMemberHistory")
 LOINC = "http://loinc.org"
 V3_ROLE = "http://terminology.hl7.org/CodeSystem/v3-RoleCode"
 RELATIVE_OF_URL = "https://unravel.health/fhir/relative-of"
+ANCESTRY_URL = "https://unravel.health/fhir/ancestry"
+
+# Ancestries well represented in AlphaMissense's training data. A carrier of any
+# other ancestry triggers the predictor down-weighting (see evidence.py).
+WELL_REPRESENTED_ANCESTRIES = {"European"}
 
 
 # --- variant specs (all real, all in the warehouse) ----------------------------
@@ -234,8 +239,39 @@ def build_resources() -> dict[str, list[dict]]:
         patients.append(_patient(pid, fam, giv, sex, dob))
         observations.append(_observation(f"obs-{pid}", pid, variant, rec_class, rec_date))
 
+    # Ancestry (additive metadata only; variants/classifications unchanged). Drives
+    # the predictor down-weighting: a carrier of an under-represented ancestry has
+    # their AlphaMissense PP3 trusted one tier less. Mei Tanaka carries the SAME
+    # HERO variant as Diane, so the two are a clean side-by-side demonstration.
+    ancestry_map = {
+        "diane-marchetti": "European", "laura-marchetti": "European",
+        "sofia-marchetti": "European", "marco-marchetti": "European",
+        "mei-tanaka": "East Asian", "rajesh-patel": "South Asian", "sarah-cohen": "European",
+        "thomas-nguyen": "East Asian", "david-nguyen": "East Asian",
+        "eric-larsson": "European", "grace-mensah": "African",
+        "lucia-romero": "Hispanic", "wei-chen": "East Asian", "hannah-schmidt": "European",
+    }
+    for p in patients:
+        anc = ancestry_map.get(p["id"])
+        if anc:
+            p.setdefault("extension", []).append({"url": ANCESTRY_URL, "valueString": anc})
+
     return {"Patient": patients, "Observation": observations,
             "FamilyMemberHistory": histories}
+
+
+def patient_ancestry(p: dict) -> str | None:
+    for ext in p.get("extension", []):
+        if ext.get("url") == ANCESTRY_URL:
+            return ext.get("valueString")
+    return None
+
+
+def ancestry_underrepresented(p: dict) -> bool:
+    """True if the patient's recorded ancestry is under-represented in the
+    predictor's training data (so its score is trusted less)."""
+    anc = patient_ancestry(p)
+    return bool(anc) and anc not in WELL_REPRESENTED_ANCESTRIES
 
 
 # --- Firestore I/O -------------------------------------------------------------

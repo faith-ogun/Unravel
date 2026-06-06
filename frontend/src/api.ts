@@ -78,6 +78,8 @@ export interface CohortRow {
   gnomad_af: number | null;
   am_pathogenicity: number | null;
   am_class: string | null;
+  ancestry: string | null;
+  ancestry_downweighted: boolean;
   cited: string[];
   breakdown: PosteriorBreakdown;
 }

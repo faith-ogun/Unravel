@@ -53,6 +53,20 @@ AM_PP3_MODERATE = 0.90
 AM_PP3_STRONG = 0.99
 AM_BP4_SUPPORTING = 0.34
 
+# Ancestry-aware predictor down-weighting (the AlphaMissense bias mitigation).
+# Variant-effect predictors are trained on European-ancestry-skewed data and
+# perform unevenly across ancestries (Pathak 2024; Livesey & Marsh 2024). For a
+# carrier of an under-represented ancestry we trust the AlphaMissense PP3 one
+# strength tier less, so a single, possibly biased, predictor cannot drive the
+# verdict on its own; the agent leans on ancestry-robust evidence (segregation,
+# functional, population frequency) instead. The benign side (BP4) is already
+# held at Supporting, so it is left unchanged.
+_DOWNWEIGHT = {
+    Strength.STRONG: Strength.MODERATE,
+    Strength.MODERATE: Strength.SUPPORTING,
+    Strength.SUPPORTING: Strength.SUPPORTING,
+}
+
 
 @dataclass(frozen=True)
 class VariantKey:
@@ -91,8 +105,12 @@ def _gnomad_items(af) -> list[EvidenceItem]:
     return []  # intermediate frequency: no PM2/BS1/BA1 criterion
 
 
-def _alphamissense_items(am, am_class) -> list[EvidenceItem]:
-    """In-silico missense criterion, strength scaled by the calibrated score."""
+def _alphamissense_items(am, am_class, *, downweight: bool = False) -> list[EvidenceItem]:
+    """In-silico missense criterion, strength scaled by the calibrated score.
+
+    `downweight` lowers the PP3 strength one tier for a carrier of an
+    under-represented ancestry (predictor-bias mitigation).
+    """
     if am is None:
         return []
     if am >= AM_PP3_SUPPORTING:
@@ -102,10 +120,11 @@ def _alphamissense_items(am, am_class) -> list[EvidenceItem]:
             strength = Strength.MODERATE
         else:
             strength = Strength.SUPPORTING
-        return [EvidenceItem(
-            "PP3", source="AlphaMissense", strength=strength,
-            detail=f"am_pathogenicity {am:.3f} ({am_class})",
-        )]
+        detail = f"am_pathogenicity {am:.3f} ({am_class})"
+        if downweight:
+            strength = _DOWNWEIGHT[strength]
+            detail += "; predictor down-weighted (under-represented ancestry)"
+        return [EvidenceItem("PP3", source="AlphaMissense", strength=strength, detail=detail)]
     if am <= AM_BP4_SUPPORTING:
         return [EvidenceItem(
             "BP4", source="AlphaMissense", strength=Strength.SUPPORTING,
@@ -114,11 +133,12 @@ def _alphamissense_items(am, am_class) -> list[EvidenceItem]:
     return []  # ambiguous middle band: not met
 
 
-def acmg_items_from_row(row: dict) -> list[EvidenceItem]:
+def acmg_items_from_row(row: dict, *, ancestry_underrepresented: bool = False) -> list[EvidenceItem]:
     """Map one warehouse row to its commons-derived ACMG criteria (pure)."""
     items: list[EvidenceItem] = []
     items += _gnomad_items(row.get("gnomad_af"))
-    items += _alphamissense_items(row.get("am_pathogenicity"), row.get("am_class"))
+    items += _alphamissense_items(row.get("am_pathogenicity"), row.get("am_class"),
+                                  downweight=ancestry_underrepresented)
     return items
 
 
@@ -135,6 +155,7 @@ class EvidenceContext:
     gnomad_af: float | None = None
     am_pathogenicity: float | None = None
     am_class: str | None = None
+    ancestry_underrepresented: bool = False
     found: bool = True
 
 
@@ -166,6 +187,7 @@ def build_evidence_ledger(
     client=None,
     row: dict | None = None,
     extra: list[EvidenceItem] | None = None,
+    ancestry_underrepresented: bool = False,
 ) -> EvidenceContext:
     """Assemble the ACMG ledger for a variant.
 
@@ -185,7 +207,7 @@ def build_evidence_ledger(
 
     gene = row.get("gene_symbol")
     ledger = Ledger(variant=key.label(gene))
-    ledger.items.extend(acmg_items_from_row(row))
+    ledger.items.extend(acmg_items_from_row(row, ancestry_underrepresented=ancestry_underrepresented))
     if extra:
         ledger.items.extend(extra)
 
@@ -199,4 +221,5 @@ def build_evidence_ledger(
         gnomad_af=row.get("gnomad_af"),
         am_pathogenicity=row.get("am_pathogenicity"),
         am_class=row.get("am_class"),
+        ancestry_underrepresented=ancestry_underrepresented,
     )

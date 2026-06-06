@@ -89,8 +89,10 @@ def cohort_overview(client=None) -> list[dict]:
         if key is None:
             continue
         pid = obs["subject"]["reference"].split("/")[-1]
+        patient = patients.get(pid, {})
+        ur = registry.ancestry_underrepresented(patient)
         row = rows.get(_gid(key))
-        ctx = build_evidence_ledger(key, row=row)
+        ctx = build_evidence_ledger(key, row=row, ancestry_underrepresented=ur)
         post = score_posterior(ctx.ledger)
         det = dets.get(pid)
         out.append({
@@ -114,6 +116,8 @@ def cohort_overview(client=None) -> list[dict]:
             "gnomad_af": (row or {}).get("gnomad_af"),
             "am_pathogenicity": (row or {}).get("am_pathogenicity"),
             "am_class": (row or {}).get("am_class"),
+            "ancestry": registry.patient_ancestry(patient),
+            "ancestry_downweighted": ur,
             "cited": post.cited_lines(),
             "breakdown": posterior_breakdown(ctx.ledger),
         })
@@ -130,7 +134,9 @@ def _resolve(pid: str, client):
     if obs is None:
         return None
     key = registry.observation_variant(obs)
-    ctx = build_evidence_ledger(key, client=client)
+    patient = next((p for p in data["Patient"] if p["id"] == pid), {})
+    ur = registry.ancestry_underrepresented(patient)
+    ctx = build_evidence_ledger(key, client=client, ancestry_underrepresented=ur)
     post = score_posterior(ctx.ledger)
     return {
         "data": data, "obs": obs, "key": key, "ctx": ctx, "post": post,
