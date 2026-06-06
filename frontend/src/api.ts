@@ -155,6 +155,24 @@ export async function getCohort(): Promise<CohortRow[]> {
   return data.cohort;
 }
 
+// --- the real five-agent ADK loop (Watcher -> Adjudicator -> fan-out) ---------
+
+export interface LoopResult {
+  patient_id: string;
+  watch: { worth_escalating?: boolean; direction?: string; summary?: string };
+  verdict: { triage: string; action: string; withheld: boolean; posterior?: number; rationale: string };
+  plan: { applicable?: boolean; recommendation?: string; top_experiment?: string; projected_posterior?: number };
+  cascade: { applicable?: boolean; drafts?: { recipient: string; relationship: string; recommendation?: string; message?: string }[] };
+  fhir_drafts: Record<string, unknown>[];
+  steward: { ethics_routes?: { deceased: string; route?: string; living_relatives?: string[] }[]; give_back?: { classification?: string; rationale?: string } };
+}
+
+export async function runLoop(patientId: string): Promise<LoopResult> {
+  const res = await fetch(`${BASE}/run-loop?patient=${encodeURIComponent(patientId)}`, { method: 'POST' });
+  if (!res.ok) throw new Error(await detail(res));
+  return res.json();
+}
+
 export async function adjudicate(patientId: string): Promise<Adjudication> {
   const res = await fetch(`${BASE}/adjudicate?patient=${encodeURIComponent(patientId)}`, {
     method: 'POST',

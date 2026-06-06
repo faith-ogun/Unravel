@@ -149,44 +149,6 @@ def _resolve(pid: str, client):
     }
 
 
-def plan_patient(pid: str, *, client=None) -> dict:
-    """Resolution Planner: rank the next experiment for this patient's variant."""
-    from .planner import plan_next_evidence
-    if client is None:
-        from google.cloud import bigquery
-        client = bigquery.Client(project=registry.PROJECT)
-    r = _resolve(pid, client)
-    if r is None:
-        return {"error": f"no patient {pid}"}
-    return plan_next_evidence(r["ctx"]).as_dict()
-
-
-def cascade_patient(pid: str, *, client=None) -> dict:
-    """Cascade Coordinator: draft recontact for this patient's variant."""
-    from .cascade import draft_recontact
-    if client is None:
-        from google.cloud import bigquery
-        client = bigquery.Client(project=registry.PROJECT)
-    r = _resolve(pid, client)
-    if r is None:
-        return {"error": f"no patient {pid}"}
-    return draft_recontact(r["key"], gene=r["gene"], hgvs=r["hgvs_c"], data=r["data"])
-
-
-def steward_patient(pid: str, *, client=None) -> dict:
-    """Steward: deceased-proband ethics routing + draft ClinVar give-back."""
-    from .steward import steward_review
-    if client is None:
-        from google.cloud import bigquery
-        client = bigquery.Client(project=registry.PROJECT)
-    r = _resolve(pid, client)
-    if r is None:
-        return {"error": f"no patient {pid}"}
-    return steward_review(r["key"], gene=r["gene"], hgvs=r["hgvs_c"],
-                          current_class=r["current_class"], review_stars=r["review_stars"],
-                          cited=r["cited"], data=r["data"])
-
-
 def pedigree_patient(pid: str) -> dict:
     """The family pedigree around a patient, with contact + recontact state."""
     return registry.pedigree(pid)
@@ -367,45 +329,3 @@ def graph_patient(pid: str, *, client=None) -> dict:
         link(rel["carrier_id"], rid, weight=1.0, label=relationship)
 
     return {"nodes": nodes, "edges": edges}
-
-
-def adjudicate_patient(pid: str, *, freshness: str | None = None, client=None) -> dict:
-    """Run the live Gemini Adjudicator for one patient. Returns a verdict dict."""
-    from .adjudicator import adjudicate  # lazy: avoids importing ADK for cohort calls
-
-    if client is None:
-        from google.cloud import bigquery
-        client = bigquery.Client(project=registry.PROJECT)
-
-    data = registry.fetch_all()
-    dets = {d.patient_id: d for d in detect_reclassifications(data=data, client=client)}
-    reclass = dets.get(pid)
-    if reclass is None:
-        return {"patient_id": pid, "reclassified": False,
-                "message": "No reclassification for this patient; nothing to adjudicate."}
-
-    ctx = build_evidence_ledger(reclass.variant, client=client)
-    adj = adjudicate(reclass, ctx, freshness=freshness)
-    p, v = adj.posterior, adj.verdict
-    return {
-        "patient_id": pid,
-        "reclassified": True,
-        "gene": reclass.gene,
-        "hgvs_c": reclass.hgvs_c,
-        "hgvs_p": registry.observation_field(
-            next(o for o in data["Observation"]
-                 if o["subject"]["reference"].endswith(pid)), "48005-3"),
-        "current_class": reclass.current_class,
-        "review_stars": reclass.review_stars,
-        "posterior": round(p.posterior, 4),
-        "points": p.points,
-        "band": p.band.value,
-        "cited": p.cited_lines(),
-        "verdict": {
-            "triage": v.triage,
-            "action": v.action,
-            "withheld": v.withheld,
-            "rationale": v.rationale,
-            "key_evidence": v.key_evidence,
-        },
-    }

@@ -48,42 +48,14 @@ def cohort() -> dict:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
 
-@app.post("/api/adjudicate")
-def adjudicate(patient: str) -> dict:
-    """Run the live Gemini Adjudicator for one patient (slow, on demand)."""
-    from unravel.watch import adjudicate_patient
+@app.post("/api/run-loop")
+def run_loop(patient: str) -> dict:
+    """Run the full five-agent ADK loop on one patient (the real multi-agent
+    flow: Watcher -> Adjudicator -> parallel fan-out of Planner/Cascade/Steward,
+    sharing one Session). Slow, on demand; returns every agent's output."""
+    from unravel.agents import run_loop as _run
     try:
-        return adjudicate_patient(patient)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
-
-
-@app.post("/api/plan")
-def plan(patient: str) -> dict:
-    """Resolution Planner: rank the next experiment by information value."""
-    from unravel.watch import plan_patient
-    try:
-        return plan_patient(patient)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
-
-
-@app.post("/api/cascade")
-def cascade(patient: str) -> dict:
-    """Cascade Coordinator: draft family recontact (draft-only)."""
-    from unravel.watch import cascade_patient
-    try:
-        return cascade_patient(patient)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
-
-
-@app.post("/api/steward")
-def steward(patient: str) -> dict:
-    """Steward: deceased-proband ethics routing + draft ClinVar give-back."""
-    from unravel.watch import steward_patient
-    try:
-        return steward_patient(patient)
+        return _run(patient)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
