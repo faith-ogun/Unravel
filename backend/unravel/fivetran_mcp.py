@@ -37,6 +37,20 @@ PROJECT = "unravel-ra"
 EVIDENCE_SCHEMAS = ("clinvar", "gnomad", "alphamissense")
 _SCHEMA_PATH = re.compile(r"(open-api-definitions/[^'\"]+\.json)")
 
+# Known Fivetran connector ids for the evidence feeds (created via the REST API,
+# see the Day-2 handoff). Used by the REST freshness path, which works in
+# environments where the MCP server cannot be spawned (e.g. the slim Cloud Run
+# container has no git for `uvx --from git+...`).
+_CONNECTORS = {
+    "clinvar": "inexperience_publicly",
+    "gnomad": "afferent_wisplike",
+    "alphamissense": "fall_frequent",
+}
+
+
+def _on_cloud_run() -> bool:
+    return bool(os.environ.get("K_SERVICE"))
+
 
 def _secret(name: str) -> str:
     # On Cloud Run the secrets are mounted as env vars via --set-secrets
@@ -184,12 +198,65 @@ async def trigger_resync_async(connection_id: str, *, force: bool = True) -> dic
         return res if isinstance(res, dict) else {"code": "Error", "message": str(res)}
 
 
+# --- REST fallback (no MCP subprocess; works inside the Cloud Run container) ----
+
+
+def _rest_request(method: str, path: str, body: dict | None = None) -> dict:
+    import base64
+    import urllib.request
+
+    key, secret = _secret("fivetran-api-key"), _secret("fivetran-api-secret")
+    token = base64.b64encode(f"{key}:{secret}".encode()).decode()
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        f"https://api.fivetran.com/v1{path}", data=data, method=method,
+        headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return json.loads(resp.read().decode())
+
+
+def check_freshness_rest() -> list[FeedFreshness]:
+    """Freshness via the Fivetran REST API (used when the MCP server can't run)."""
+    feeds = []
+    for schema, cid in _CONNECTORS.items():
+        try:
+            data = _rest_request("GET", f"/connectors/{cid}").get("data", {})
+        except Exception:
+            feeds.append(FeedFreshness(schema, cid, "", None, None, None))
+            continue
+        succeeded = data.get("succeeded_at")
+        feeds.append(FeedFreshness(
+            schema=schema, connection_id=cid, service=data.get("service", ""),
+            sync_state=(data.get("status") or {}).get("sync_state"),
+            succeeded_at=succeeded, hours_old=_hours_since(succeeded),
+        ))
+    return feeds
+
+
+def trigger_resync_rest(connection_id: str) -> dict:
+    """Targeted re-sync via the Fivetran REST API."""
+    return _rest_request("POST", f"/connectors/{connection_id}/sync", {"force": True})
+
+
 def check_freshness() -> list[FeedFreshness]:
-    return asyncio.run(check_freshness_async())
+    # On Cloud Run the MCP server cannot spawn (no git for uvx); go straight to
+    # REST. Elsewhere, use the deep MCP path and fall back to REST on any error.
+    if _on_cloud_run():
+        return check_freshness_rest()
+    try:
+        return asyncio.run(check_freshness_async())
+    except Exception:
+        return check_freshness_rest()
 
 
 def trigger_resync(connection_id: str) -> dict:
-    return asyncio.run(trigger_resync_async(connection_id))
+    if _on_cloud_run():
+        return trigger_resync_rest(connection_id)
+    try:
+        return asyncio.run(trigger_resync_async(connection_id))
+    except Exception:
+        return trigger_resync_rest(connection_id)
 
 
 def freshness_report(feeds: list[FeedFreshness] | None = None) -> str:

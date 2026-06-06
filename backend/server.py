@@ -117,8 +117,9 @@ def freshness() -> dict:
             "hours_old": round(f.hours_old, 1) if f.hours_old is not None else None,
             "is_stale": f.is_stale,
         } for f in feeds]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+    except Exception:
+        # degrade gracefully rather than 500: the UI just shows no Fivetran feeds
+        return {"feeds": []}
 
 
 @app.post("/api/resync")
