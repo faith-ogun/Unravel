@@ -35,7 +35,8 @@ from mcp.client.stdio import stdio_client
 
 PROJECT = "unravel-ra"
 # evidence feeds we care about, keyed by the BigQuery schema the connector writes.
-EVIDENCE_SCHEMAS = ("clinvar", "gnomad", "alphamissense")
+# gnomad_sdk is the custom Connector-SDK connector (Python hosted on Fivetran).
+EVIDENCE_SCHEMAS = ("clinvar", "gnomad", "alphamissense", "gnomad_sdk")
 _SCHEMA_PATH = re.compile(r"(open-api-definitions/[^'\"]+\.json)")
 
 # Known Fivetran connector ids for the evidence feeds (created via the REST API,
@@ -46,6 +47,7 @@ _CONNECTORS = {
     "clinvar": "inexperience_publicly",
     "gnomad": "afferent_wisplike",
     "alphamissense": "fall_frequent",
+    "gnomad_sdk": "turban_conferring",   # custom Connector SDK connector (Python on Fivetran)
 }
 
 

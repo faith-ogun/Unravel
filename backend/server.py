@@ -151,18 +151,39 @@ def freshness() -> dict:
 def resync(connection_id: str) -> dict:
     """Trigger a targeted Fivetran re-sync via the MCP write path."""
     from unravel.fivetran_mcp import trigger_resync
+    from unravel import audit
     try:
-        return trigger_resync(connection_id)
+        res = trigger_resync(connection_id)
+        audit.log("fivetran", f"MCP sync_connection → re-sync {connection_id}", tone="ok")
+        return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/audit")
+def audit_log(limit: int = 100) -> dict:
+    """The persistent audit trail (agent verdicts + Fivetran actions), newest first."""
+    from unravel import audit
+    return {"events": audit.recent(limit)}
+
+
+@app.post("/api/approve")
+def approve(patient: str, action: str = "recontact") -> dict:
+    """Record a clinician approval of a flagged case (human-in-the-loop), to the
+    persistent audit trail."""
+    from unravel import audit
+    audit.log("approval", f"clinician approved {action} for {patient}", tone="ok", actor="clinician")
+    return {"ok": True, "patient": patient, "action": action}
 
 
 @app.post("/api/fivetran/pause")
 def fivetran_pause(connection_id: str, paused: bool) -> dict:
     """Pause or resume a Fivetran connector via the MCP write path (CRUD: update)."""
     from unravel.fivetran_mcp import set_paused
+    from unravel import audit
     try:
         res = set_paused(connection_id, paused)
+        audit.log("fivetran", f"MCP modify_connection → {'paused' if paused else 'resumed'} {connection_id}", tone="ok")
         return {"ok": True, "connection_id": connection_id, "paused": paused, "result": res}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
@@ -191,8 +212,11 @@ def onboard(gene: str) -> dict:
     """Onboard a gene: stage its evidence to GCS, have the agent create a Fivetran
     connector via the MCP (CRUD: create), sync it, and mark the gene onboarded."""
     from unravel.onboarding import onboard_gene
+    from unravel import audit
     try:
-        return onboard_gene(gene)
+        res = onboard_gene(gene)
+        audit.log("fivetran", f"MCP create_connection → onboarded {res['gene']} to {res['schema']} ({res['connection_id']}), {res['n_variants']} variants", tone="ok", actor="clinician-approved")
+        return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 

@@ -264,4 +264,9 @@ async def run_loop_events_async(patient_id: str):
         payload = {"agent": author, "node": node, "key": key, "data": data}
         if author == "cascade_coordinator":
             payload["fhir_drafts"] = _fhir_drafts(data)
+        if author == "adjudicator" and isinstance(data, dict):
+            from . import audit
+            audit.log("agent", f"{patient_id}: {data.get('triage')} / {data.get('action')}"
+                      f"{' (withheld)' if data.get('withheld') else ''}",
+                      tone="warn" if data.get("withheld") else "ok")
         yield payload

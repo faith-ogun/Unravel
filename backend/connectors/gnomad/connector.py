@@ -43,8 +43,9 @@ def _variants(gene: str):
     body = json.dumps({"query": _QUERY, "variables": {"s": gene}}).encode()
     req = urllib.request.Request(
         GNOMAD_API, data=body, method="POST",
-        headers={"Content-Type": "application/json", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
+        headers={"Content-Type": "application/json", "Accept": "application/json",
+                 "User-Agent": "unravel-fivetran-connector/1.0"})
+    with urllib.request.urlopen(req, timeout=120) as r:
         data = json.load(r)
     return (((data.get("data") or {}).get("gene") or {}).get("variants")) or []
 

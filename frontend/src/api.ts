@@ -86,9 +86,22 @@ export interface CohortRow {
   breakdown: PosteriorBreakdown;
 }
 
-export interface WarehouseInfo { view: string; sources: string[]; query: string; }
+export interface WarehouseInfo { view: string; sources: string[]; query: string; variant_count?: number | null; }
 export async function getWarehouseInfo(): Promise<WarehouseInfo> {
   const res = await fetch(`${BASE}/warehouse`);
+  if (!res.ok) throw new Error(await detail(res));
+  return res.json();
+}
+
+export interface AuditLogEvent { category: string; text: string; tone?: string; actor?: string; ts_ms?: number; }
+export async function getAuditLog(limit = 100): Promise<{ events: AuditLogEvent[] }> {
+  const res = await fetch(`${BASE}/audit?limit=${limit}`);
+  if (!res.ok) throw new Error(await detail(res));
+  return res.json();
+}
+
+export async function approveCase(patient: string, action = 'recontact'): Promise<{ ok: boolean }> {
+  const res = await fetch(`${BASE}/approve?patient=${encodeURIComponent(patient)}&action=${encodeURIComponent(action)}`, { method: 'POST' });
   if (!res.ok) throw new Error(await detail(res));
   return res.json();
 }

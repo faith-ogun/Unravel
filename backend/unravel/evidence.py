@@ -56,10 +56,28 @@ def warehouse_query(key: "VariantKey | None" = None) -> str:
             f"  AND alternate_allele = '{key.alternate_allele}'\nLIMIT 1")
 
 
+_VARIANT_COUNT: dict = {"n": None}
+
+
+def variant_count(client=None) -> "int | None":
+    """Total variants under surveillance in the warehouse view (cached)."""
+    if _VARIANT_COUNT["n"] is not None:
+        return _VARIANT_COUNT["n"]
+    try:
+        from google.cloud import bigquery
+        client = client or bigquery.Client(project=PROJECT)
+        rows = list(client.query(f"SELECT COUNT(*) AS c FROM `{EVIDENCE_VIEW}`").result())
+        _VARIANT_COUNT["n"] = int(rows[0].c)
+    except Exception:
+        pass
+    return _VARIANT_COUNT["n"]
+
+
 def warehouse_info() -> dict:
     """Describe the curated AI data plane: the view, its Fivetran-synced sources,
-    and the canonical query the agents run."""
-    return {"view": EVIDENCE_VIEW, "sources": EVIDENCE_SOURCES, "query": warehouse_query()}
+    the canonical query the agents run, and the variant count under surveillance."""
+    return {"view": EVIDENCE_VIEW, "sources": EVIDENCE_SOURCES,
+            "query": warehouse_query(), "variant_count": variant_count()}
 
 # --- gnomAD frequency thresholds (ACMG PM2 / BS1 / BA1) -------------------------
 # General-purpose cutoffs. ClinGen gene-specific VCEPs (e.g. the InSiGHT/MMR panel

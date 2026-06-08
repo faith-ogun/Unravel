@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Database, Dna, Cpu, Box, Sparkles, Eye, Scale, GitBranch, Users, ShieldCheck,
-  List, Network, UserPlus, Server, ScrollText, RefreshCw,
+  List, Network, UserPlus, Server, ScrollText, RefreshCw, ClipboardCheck,
 } from 'lucide-react';
 import {
   getCohort, getFreshness, resync, pauseConnector, runLoopStream, getStructural,
-  getOnboardStatus, onboardGene, getWarehouseInfo,
+  getOnboardStatus, onboardGene, getWarehouseInfo, getAuditLog, approveCase,
   type CohortRow, type Feed, type Adjudication, type ResolutionPlan,
   type CascadeResult, type StewardResult, type Structural, type LoopStreamEvent,
-  type OnboardStatus, type WarehouseInfo,
+  type OnboardStatus, type WarehouseInfo, type AuditLogEvent,
 } from '../api';
 import PedigreeView from '../dash/PedigreeView';
 import GraphView from '../dash/GraphView';
@@ -16,12 +16,13 @@ import AddPatientView from '../dash/AddPatientView';
 import StructureViewer from '../dash/StructureViewer';
 import PosteriorBreakdown from '../dash/PosteriorBreakdown';
 
-type View = 'watchlist' | 'pedigree' | 'graph' | 'explorer' | 'audit' | 'add';
+type View = 'watchlist' | 'pedigree' | 'graph' | 'explorer' | 'approvals' | 'audit' | 'add';
 const NAV: { id: View; label: string; icon: typeof List }[] = [
   { id: 'watchlist', label: 'Watchlist', icon: List },
   { id: 'pedigree', label: 'Pedigree', icon: Users },
   { id: 'graph', label: 'Knowledge graph', icon: Network },
   { id: 'explorer', label: 'Data explorer', icon: Server },
+  { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
   { id: 'audit', label: 'Audit trail', icon: ScrollText },
   { id: 'add', label: 'Add patient', icon: UserPlus },
 ];
@@ -82,6 +83,8 @@ export default function AppDashboard() {
   const [onboarding, setOnboarding] = useState<string | null>(null);
   const [pendingOnboard, setPendingOnboard] = useState<string | null>(null);
   const [warehouse, setWarehouse] = useState<WarehouseInfo | null>(null);
+  const [auditLog, setAuditLog] = useState<AuditLogEvent[]>([]);
+  const [approved, setApproved] = useState<Record<string, boolean>>({});
   const [sel, setSel] = useState<CohortRow | null>(null);
 
   const [nodes, setNodes] = useState<Record<Agent, NodeState>>({
@@ -105,6 +108,7 @@ export default function AppDashboard() {
     getFreshness().then(setFeeds).catch(() => setFeeds([]));
     getOnboardStatus().then(setOnboardStatus).catch(() => {});
     getWarehouseInfo().then(setWarehouse).catch(() => {});
+    getAuditLog().then((r) => setAuditLog(r.events)).catch(() => {});
   }, []);
   useEffect(() => { logRef.current?.scrollTo({ top: 1e6 }); }, [log]);
 
@@ -241,7 +245,7 @@ export default function AppDashboard() {
     if (!cohort) return;
     const params = new URLSearchParams(window.location.search);
     const v = params.get('view');
-    if (v && ['watchlist', 'pedigree', 'graph', 'explorer', 'audit', 'add'].includes(v)) setView(v as View);
+    if (v && ['watchlist', 'pedigree', 'graph', 'explorer', 'approvals', 'audit', 'add'].includes(v)) setView(v as View);
     const pid = params.get('patient');
     if (!pid) return;
     const row = cohort.find((r) => r.patient_id === pid);
@@ -279,6 +283,15 @@ export default function AppDashboard() {
     } finally {
       setOnboarding(null);
     }
+  }
+
+  async function doApprove(r: CohortRow) {
+    setApproved((a) => ({ ...a, [r.patient_id]: true }));
+    logEvent('agent', `clinician approved recontact for ${r.patient_name}`, 'ok');
+    try {
+      await approveCase(r.patient_id, 'recontact');
+      getAuditLog().then((x) => setAuditLog(x.events)).catch(() => {});
+    } catch { /* keep optimistic UI */ }
   }
 
   return (
@@ -331,16 +344,18 @@ export default function AppDashboard() {
           {view === 'pedigree' && cohort && <PedigreeView patientId={pid} cohort={cohort} />}
           {view === 'graph' && <GraphView patientId={pid} cohort={cohort} onPick={selectPatient} />}
           {view === 'explorer' && <ExplorerView feeds={feeds} events={events} resyncing={resyncing} pausing={pausing} onResync={doResync} onPause={doPause} onboard={onboardStatus} onboarding={onboarding} onOnboard={requestOnboard} warehouse={warehouse} />}
-          {view === 'audit' && <AuditView cohort={cohort} events={events} />}
+          {view === 'audit' && <AuditView cohort={cohort} events={events} persisted={auditLog} />}
+          {view === 'approvals' && <ApprovalsView cohort={cohort} approved={approved} onReview={(r) => { selectPatient(r); setView('watchlist'); }} onApprove={doApprove} />}
           {view === 'add' && cohort && <AddPatientView cohort={cohort} onAdded={refreshCohort} />}
 
           {view === 'watchlist' && (<>
           {/* impact strip */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: '.8rem' }}>
-            <Metric n={cohort ? `${flagged.length}` : '…'} label="variants reclassified" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '.8rem' }}>
+            <Metric n={warehouse?.variant_count ? warehouse.variant_count.toLocaleString() : '…'} label="variants under surveillance" />
+            <Metric n={cohort ? `${flagged.length}` : '…'} label="reclassified in cohort" />
             <Metric n={`${escalations.length}`} label="escalations to act on" tone="path" />
             <Metric n={`${maxSilent}`} label="years silent (max)" tone="path" />
-            <Metric n={feeds ? `${feeds.filter((f) => !f.is_stale).length}/${feeds.length}` : '…'} label="Fivetran feeds fresh" tone="benign" />
+            <Metric n={feeds ? `${feeds.filter((f) => !f.is_stale && !f.paused).length}/${feeds.length}` : '…'} label="Fivetran feeds fresh" tone="benign" />
           </div>
 
           <div className="uv-workgrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,340px) minmax(0,1fr)', gap: '1.1rem', alignItems: 'start' }}>
@@ -731,16 +746,17 @@ function ExplorerView({ feeds, events, resyncing, pausing, onResync, onPause, on
   );
 }
 
-function AuditView({ cohort, events }: { cohort: CohortRow[] | null; events: AuditEvent[] }) {
+function AuditView({ cohort, events, persisted }: { cohort: CohortRow[] | null; events: AuditEvent[]; persisted: AuditLogEvent[] }) {
   const reclass = (cohort ?? []).filter((r) => r.reclassified);
-  const catChip = (cat: AuditEvent['cat']) =>
+  const catChip = (cat: string) =>
     cat === 'fivetran' ? tag('var(--primary)', 'var(--primary-soft)')
       : cat === 'agent' ? tag('var(--thread-d)', 'var(--vus-bg)')
-        : tag('var(--muted)', 'var(--paper-2)');
+        : cat === 'approval' ? tag('var(--benign)', 'var(--benign-bg)')
+          : tag('var(--muted)', 'var(--paper-2)');
   return (
     <div style={{ display: 'grid', gap: '1rem' }}>
       <ViewIntro icon={ScrollText} title="Audit trail"
-        body="Every reclassification, agent verdict, and Fivetran action is recorded for clinician review. Draft-only by design: nothing reaches a patient without human approval." />
+        body="Every reclassification, agent verdict, Fivetran action and clinician approval is recorded (persisted in Firestore, surviving across sessions). Draft-only by design: nothing reaches a patient without human approval." />
 
       <div style={card}>
         <div style={eyebrow}>Reclassification ledger · {reclass.length} flagged</div>
@@ -763,16 +779,66 @@ function AuditView({ cohort, events }: { cohort: CohortRow[] | null; events: Aud
       </div>
 
       <div style={card}>
-        <div style={eyebrow}>Session activity</div>
-        <div style={{ marginTop: '.5rem', maxHeight: 340, overflowY: 'auto' }}>
-          {events.length === 0 && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no actions this session yet · select a case and run the watch loop</div>}
+        <div style={eyebrow}>Recorded history · persisted ({persisted.length})</div>
+        <div style={{ marginTop: '.5rem', maxHeight: 360, overflowY: 'auto' }}>
+          {persisted.length === 0 && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no recorded events yet · run a watch loop, a Fivetran action, or an approval</div>}
+          {persisted.map((e, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '.55rem', padding: '.34rem 0', borderTop: i ? '1px solid var(--line)' : 'none' }}>
+              <span style={mono({ fontSize: '.61rem', color: 'var(--faint)', flexShrink: 0 })}>{e.ts_ms ? new Date(e.ts_ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+              <span style={{ ...catChip(e.category), flexShrink: 0 }}>{e.category}</span>
+              <span style={mono({ fontSize: '.72rem', color: e.tone === 'warn' ? 'var(--path-d)' : e.tone === 'ok' ? 'var(--benign)' : 'var(--muted)' })}>{e.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={eyebrow}>This session</div>
+        <div style={{ marginTop: '.5rem', maxHeight: 220, overflowY: 'auto' }}>
+          {events.length === 0 && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no actions this session yet</div>}
           {events.map((e, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '.55rem', padding: '.32rem 0', borderTop: i ? '1px solid var(--line)' : 'none' }}>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '.55rem', padding: '.3rem 0', borderTop: i ? '1px solid var(--line)' : 'none' }}>
               <span style={mono({ fontSize: '.61rem', color: 'var(--faint)', flexShrink: 0 })}>{new Date(e.ts).toLocaleTimeString()}</span>
               <span style={{ ...catChip(e.cat), flexShrink: 0 }}>{e.cat}</span>
               <span style={mono({ fontSize: '.72rem', color: e.tone === 'warn' ? 'var(--path-d)' : e.tone === 'ok' ? 'var(--benign)' : 'var(--muted)' })}>{e.text}</span>
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ApprovalsView({ cohort, approved, onReview, onApprove }: {
+  cohort: CohortRow[] | null; approved: Record<string, boolean>;
+  onReview: (r: CohortRow) => void; onApprove: (r: CohortRow) => void;
+}) {
+  const queue = (cohort ?? []).filter((r) => r.reclassified).sort((a, b) => Number(b.direction === 'escalation') - Number(a.direction === 'escalation'));
+  return (
+    <div style={{ display: 'grid', gap: '1rem' }}>
+      <ViewIntro icon={ClipboardCheck} title="Approval queue · human in the loop"
+        body="Flagged cases awaiting a clinician. The agents draft; a human reviews and approves. Nothing reaches a patient autonomously." />
+      <div style={card}>
+        <div style={eyebrow}>Awaiting review · {queue.filter((r) => !approved[r.patient_id]).length} open</div>
+        <div style={{ display: 'grid', gap: '.5rem', marginTop: '.7rem' }}>
+          {queue.map((r) => {
+            const dc = dirChip(r.direction);
+            const done = approved[r.patient_id];
+            return (
+              <div key={r.patient_id} style={{ display: 'flex', alignItems: 'center', gap: '.7rem', padding: '.6rem .7rem', border: '1px solid var(--line)', borderRadius: 10, background: done ? 'var(--benign-bg)' : 'var(--paper)' }}>
+                <span style={{ ...tag(dc.fg, dc.bg), flexShrink: 0 }}>{dc.label}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 700, fontSize: '.86rem' }}>{r.patient_name}</span>
+                  <span style={mono({ fontSize: '.7rem', color: 'var(--muted)', marginLeft: '.5rem' })}>{r.gene} {r.hgvs_c} · post {r.posterior.toFixed(2)}</span>
+                </div>
+                <button onClick={() => onReview(r)} style={{ border: '1px solid var(--line-2)', background: 'var(--surface)', color: 'var(--muted)', borderRadius: 8, padding: '.4rem .75rem', fontSize: '.74rem', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>Review case</button>
+                {done
+                  ? <span style={{ ...tag('var(--benign)', 'var(--benign-bg)'), flexShrink: 0 }}>approved</span>
+                  : <button onClick={() => onApprove(r)} style={{ border: 'none', background: 'var(--primary)', color: '#fff', borderRadius: 8, padding: '.4rem .8rem', fontSize: '.74rem', fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>Approve recontact</button>}
+              </div>
+            );
+          })}
+          {queue.length === 0 && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no cases awaiting approval</div>}
         </div>
       </div>
     </div>
