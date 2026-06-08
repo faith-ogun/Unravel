@@ -44,6 +44,12 @@ backend/_staging/
 # Brand source / inspiration assets (the app serves the copies in frontend/public/)
 frontend/logo/
 
+# Firebase Hosting deploy cache (local only, regenerated on deploy)
+frontend/.firebase/
+
+# Local GIF reference examples (working assets, not for public repo)
+frontend/gif examples/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
