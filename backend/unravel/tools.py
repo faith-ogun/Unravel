@@ -132,25 +132,21 @@ def rank_next_experiments(patient_id: str) -> dict:
 
 
 def find_family(patient_id: str) -> dict:
-    """Find the carriers of a patient's variant and their untested at-risk
-    relatives, with contact details and gaps. Use this to draft recontact for an
-    actionable variant (carriers + relatives who should be offered counselling)."""
+    """Find THIS patient's family for recontact: the proband (the carrier) and
+    their untested at-risk relatives, with contact details. Scoped to one
+    pedigree, so a carrier in another family who happens to share the variant
+    (their own separate case) is not pulled in here."""
     r = _resolve(patient_id)
     if r is None:
         return {"found": False}
-    match = registry.match_affected_patients(r["key"], data=r["data"])
-    nm = registry._person  # reuse the person summariser
-    carriers = [{"name": registry._person(c["patient"], relationship="carrier",
-                                          carrier=True)["name"],
-                 "deceased": c.get("deceased", False)}
-                for c in match["carriers"]]
-    relatives = [{"id": rel["patient"]["id"],
-                  "name": registry._person(rel["patient"], relationship=rel["relationship"],
-                                          carrier=False)["name"],
-                  "relationship": rel["relationship"],
-                  "email": registry.patient_email(rel["patient"]),
-                  "contactable": registry.patient_email(rel["patient"]) is not None}
-                 for rel in match["relatives"]]
+    ped = registry.pedigree(patient_id, data=r["data"])
+    members = ped["members"]
+    carriers = [{"name": m["name"], "deceased": m["deceased"]}
+                for m in members if m["carrier"]]
+    relatives = [{"id": m["id"], "name": m["name"], "relationship": m["relationship"],
+                  "email": m.get("email"),
+                  "contactable": m.get("email") is not None}
+                 for m in members if not m["carrier"] and m["relationship"] != "proband"]
     return {"found": True, "variant": f"{r['gene']} {r['hgvs_c']}",
             "carriers": carriers, "relatives": relatives,
             "living_carriers": [c for c in carriers if not c["deceased"]]}

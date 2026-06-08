@@ -80,6 +80,7 @@ export default function AppDashboard() {
   const [pausing, setPausing] = useState<string | null>(null);
   const [onboardStatus, setOnboardStatus] = useState<OnboardStatus | null>(null);
   const [onboarding, setOnboarding] = useState<string | null>(null);
+  const [pendingOnboard, setPendingOnboard] = useState<string | null>(null);
   const [sel, setSel] = useState<CohortRow | null>(null);
 
   const [nodes, setNodes] = useState<Record<Agent, NodeState>>({
@@ -196,7 +197,9 @@ export default function AppDashboard() {
             communication: (e.fhir_drafts || [])[i] as Record<string, unknown> | undefined,
             risk_assessment: undefined,
           }));
-          setCasc({ variant: `${r.gene} ${r.hgvs_c}`, carriers: drafts.length, relatives: 0,
+          const isCarrier = (rel: string) => ['patient', 'proband', 'carrier'].includes((rel || '').toLowerCase());
+          const nCarriers = drafts.filter((x) => isCarrier(x.relationship)).length;
+          setCasc({ variant: `${r.gene} ${r.hgvs_c}`, carriers: nCarriers, relatives: drafts.length - nCarriers,
             deceased_carriers: [], drafts, note: 'Draft-only (intent: proposal, status: draft). A clinician reviews and sends.' } as CascadeResult);
           push('Cascade', `drafted ${drafts.length} clinician-facing recontact proposal(s)`, 'ok');
           setNode('Cascade', 'done');
@@ -255,9 +258,13 @@ export default function AppDashboard() {
     getOnboardStatus().then(setOnboardStatus).catch(() => {});
   };
 
-  async function doOnboard(gene: string) {
-    // human-in-the-loop approval gate before a Fivetran write
-    if (!window.confirm(`Onboard ${gene} to the warehouse?\n\nThe agent will stage ${gene}'s evidence to GCS and create a real Fivetran connector via the MCP, then sync it into BigQuery.`)) return;
+  // human-in-the-loop approval gate before a Fivetran write: open an in-app toast
+  const requestOnboard = (gene: string) => setPendingOnboard(gene);
+
+  async function confirmOnboard() {
+    const gene = pendingOnboard;
+    setPendingOnboard(null);
+    if (!gene) return;
     setOnboarding(gene);
     logEvent('fivetran', `approved: onboard ${gene} → staging evidence + MCP create_connection`, 'info');
     try {
@@ -320,8 +327,8 @@ export default function AppDashboard() {
           {err && <div style={{ ...card, ...tag('var(--path-d)', 'var(--path-bg)'), whiteSpace: 'normal' }}>Backend error: {err}. Is the API running on :8000?</div>}
 
           {view === 'pedigree' && cohort && <PedigreeView patientId={pid} cohort={cohort} />}
-          {view === 'graph' && <GraphView patientId={pid} />}
-          {view === 'explorer' && <ExplorerView feeds={feeds} events={events} resyncing={resyncing} pausing={pausing} onResync={doResync} onPause={doPause} onboard={onboardStatus} onboarding={onboarding} onOnboard={doOnboard} />}
+          {view === 'graph' && <GraphView patientId={pid} cohort={cohort} onPick={selectPatient} />}
+          {view === 'explorer' && <ExplorerView feeds={feeds} events={events} resyncing={resyncing} pausing={pausing} onResync={doResync} onPause={doPause} onboard={onboardStatus} onboarding={onboarding} onOnboard={requestOnboard} />}
           {view === 'audit' && <AuditView cohort={cohort} events={events} />}
           {view === 'add' && cohort && <AddPatientView cohort={cohort} onAdded={refreshCohort} />}
 
@@ -536,6 +543,25 @@ export default function AppDashboard() {
           </>)}
         </div>
       </div>
+
+      {pendingOnboard && (
+        <div style={{ position: 'fixed', right: 22, bottom: 22, zIndex: 1000, width: 360, maxWidth: 'calc(100vw - 44px)',
+          ...card, padding: '1rem 1.1rem', boxShadow: 'var(--sh-lg)', animation: 'uvfade .2s ease both' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
+            <ShieldCheck size={16} color="var(--primary)" />
+            <span style={{ ...eyebrow, color: 'var(--primary)' }}>Approval required</span>
+          </div>
+          <div style={{ fontSize: '.86rem', color: 'var(--ink)', marginTop: '.5rem', lineHeight: 1.5 }}>
+            Onboard <b>{pendingOnboard}</b> to the warehouse? The agent will stage its evidence to GCS and <b>create a real Fivetran connector via the MCP</b>, then sync it into BigQuery.
+          </div>
+          <div style={{ display: 'flex', gap: '.5rem', marginTop: '.85rem', justifyContent: 'flex-end' }}>
+            <button onClick={() => setPendingOnboard(null)}
+              style={{ border: '1px solid var(--line-2)', background: 'var(--surface)', color: 'var(--muted)', borderRadius: 8, padding: '.45rem .9rem', fontSize: '.8rem', fontWeight: 600, cursor: 'pointer' }}>Dismiss</button>
+            <button onClick={confirmOnboard}
+              style={{ border: 'none', background: 'var(--primary)', color: '#fff', borderRadius: 8, padding: '.45rem 1rem', fontSize: '.8rem', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(36,80,164,.25)' }}>Approve &amp; onboard</button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

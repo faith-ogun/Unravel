@@ -60,7 +60,7 @@ export default function AddPatientView({ cohort, onAdded }: { cohort: CohortRow[
       const variantMsg = rv
         ? ` Resolved live: ${rv.gene ?? '?'} ${rv.hgvs_c ?? ''}${rv.hgvs_p ? ` (${rv.hgvs_p})` : ''}${rv.consequence ? ` · ${rv.consequence.replace(/_/g, ' ')}` : ''}.`
         : '';
-      setDone(`${f.given} ${f.family} added to the registry (${r.patient_id}).${variantMsg}`);
+      setDone(`${f.given} ${f.family} is now in the registry.${variantMsg}`);
       setF({ given: '', family: '', gender: 'unknown', birth: '', email: '', phone: '', relative_of: '', relationship: '', ancestry: '', carrier: false, variant_query: '' });
       onAdded();
     } catch (e: unknown) {
@@ -157,7 +157,7 @@ export default function AddPatientView({ cohort, onAdded }: { cohort: CohortRow[
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1.3rem' }}>
         <button onClick={submit} disabled={busy}
           style={{ background: 'var(--thread)', color: '#fff', fontWeight: 700, borderRadius: 9, padding: '.6rem 1.3rem', fontSize: '.88rem', opacity: busy ? 0.6 : 1 }}>
-          {busy ? 'Adding…' : 'Add to registry'}
+          {busy ? 'Adding…' : 'Add patient'}
         </button>
         {done && <span style={{ color: 'var(--benign)', display: 'flex', alignItems: 'center', gap: '.4rem', fontSize: '.84rem' }}><Check size={14} /> {done}</span>}
         {err && <span style={{ color: 'var(--path-d)', ...mono({ fontSize: '.8rem' }) }}>{err}</span>}

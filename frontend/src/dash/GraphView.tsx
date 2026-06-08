@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
-import { getGraph, type Graph, type GraphNode } from '../api';
+import { getGraph, type Graph, type GraphNode, type CohortRow } from '../api';
 import { card, mono, eyebrow, tag } from './ui';
 
 const COLOR: Record<string, string> = {
@@ -30,7 +30,7 @@ type FGLink = { source: string | FGNode; target: string | FGNode; weight?: numbe
 
 function nodeId(n: string | FGNode): string { return typeof n === 'object' ? n.id : n; }
 
-export default function GraphView({ patientId }: { patientId: string }) {
+export default function GraphView({ patientId, cohort, onPick }: { patientId: string; cohort?: CohortRow[] | null; onPick?: (r: CohortRow) => void }) {
   const [graph, setGraph] = useState<Graph | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [width, setWidth] = useState(800);
@@ -127,7 +127,15 @@ export default function GraphView({ patientId }: { patientId: string }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '.5rem', padding: '1rem 1.2rem .6rem' }}>
         <div>
           <div style={{ ...eyebrow, color: '#7f8aa3' }}>Evidence knowledge graph</div>
-          <div style={{ fontSize: '.78rem', color: '#9aa4b8', marginTop: '.2rem' }}>
+          {cohort && onPick && (
+            <select
+              value={patientId}
+              onChange={(e) => { const row = cohort.find((c) => c.patient_id === e.target.value); if (row) onPick(row); }}
+              style={{ marginTop: '.4rem', background: '#13161f', color: '#d7deec', border: '1px solid #2a3147', borderRadius: 8, padding: '.35rem .6rem', fontSize: '.82rem', fontWeight: 600, fontFamily: 'var(--sans)', cursor: 'pointer' }}>
+              {cohort.map((c) => <option key={c.patient_id} value={c.patient_id}>{c.patient_name} — {c.gene} {c.hgvs_c}</option>)}
+            </select>
+          )}
+          <div style={{ fontSize: '.78rem', color: '#9aa4b8', marginTop: '.35rem' }}>
             Click a node to inspect. Hover to trace connections. Drag to rearrange.
           </div>
         </div>
