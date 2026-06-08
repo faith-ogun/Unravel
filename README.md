@@ -160,10 +160,28 @@ We acknowledge existing work openly. Each tool owns only **one** link of the cha
 
 ---
 
+## Hackathon requirements (Rapid Agent · Fivetran track)
+
+Every requirement, mapped to where it lives.
+
+| Requirement | How Unravel meets it |
+|---|---|
+| **Fivetran destination** (BigQuery / Cloud Storage / Cloud SQL) | Three Fivetran **GCS → BigQuery** connectors land ClinVar, gnomAD and AlphaMissense; a curated view (`backend/sql/variant_evidence.sql`) models them into the AI data plane the agents query. |
+| **Fivetran MCP server** (hard requirement) | The official `fivetran-mcp` server is baked into the Cloud Run image and driven live by the app: freshness checks (`get_connection_details`) before each adjudication, targeted re-syncs (`sync_connection`), pause/resume (`modify_connection`), and on-demand connector **creation** (`create_connection`) for gene onboarding. `backend/unravel/fivetran_mcp.py`, `onboarding.py`. |
+| **Google Cloud AI tooling** | Gemini 3.1 Pro + Flash-Lite (Vertex AI), orchestrated as a five-agent **Google ADK** system (Sequential root + Parallel fan-out). `backend/unravel/agents.py`. |
+| **End-to-end** | Fivetran MCP → BigQuery data plane → five ADK agents (freshness-checked) → draft FHIR clinical action, all visible on the live dashboard. |
+| **Freshness-aware reasoning** | The loop checks each feed's freshness via the MCP before the Adjudicator rules; stale feeds can be re-synced. Agents are only as good as the data they access. |
+| **Human-in-the-loop** | Every clinical output is a **draft** FHIR resource a clinician approves; every Fivetran write (onboarding) is gated behind an explicit in-app approval. |
+| **Agent CRUD on Fivetran** | The Data explorer is a live control plane: list, health-check, pause, resume, sync, and create connectors, every action logged. |
+| **Reproducibility** | `backend/scripts/setup_fivetran.py` recreates the connectors via the MCP; `backend/sql/variant_evidence.sql` recreates the curated view. |
+| **Working deployment** | Live at **unravel-ra.web.app** (SPA) + Cloud Run API. |
+
+---
+
 ## Data sources
 
-- **Evidence (real, public):** ClinVar (assertions + review stars), gnomAD v4 (allele frequency), AlphaMissense (in-silico missense), AlphaFold (structures). ClinGen expert-panel calls arrive via ClinVar review status; OncoKB / CIViC are future feeds.
-- **Patients (synthetic):** a hand-crafted demo family (Diane Marchetti, MLH1 c.114C>G) whose variant genuinely crossed a reclassification boundary, plus silent-cohort carriers, a deceased-proband case, and the 1-star "trap." A mixed, fictional cohort of 20 patients across varied backgrounds.
+- **Evidence (real, public):** ClinVar (assertions + review stars), gnomAD v4 (allele frequency), AlphaMissense (in-silico missense), AlphaFold (structures). ClinGen expert-panel calls arrive via ClinVar review status; OncoKB / CIViC are future feeds. Onboarded genes are served from the Fivetran-synced warehouse; any other gene is resolved live from the public commons (Ensembl VEP + gnomAD + ClinVar), so the system is disease-agnostic.
+- **Patients (synthetic):** a trimmed demo cohort of five carriers, each with a real pedigree (Diane Marchetti, MLH1 c.114C>G, whose variant genuinely crossed a reclassification boundary; Mei Tanaka, the same variant with the ancestry equity arm; the 1-star "trap"; a benign downgrade; a deceased-proband ethics case).
 - No real patient data is used.
 
 ---

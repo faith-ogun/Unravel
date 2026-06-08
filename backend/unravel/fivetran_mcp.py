@@ -292,13 +292,13 @@ DEST_GROUP = "humpback_added"   # the BigQuery destination group
 EVIDENCE_BUCKET = "unravel-ra-evidence-raw"
 
 
-def _create_connection_body(schema: str, prefix: str) -> dict:
+def _create_connection_body(schema: str, prefix: str, table: str = "evidence") -> dict:
     """The verified GCS-connector create payload (mirrors the seeded connectors)."""
     return {
         "service": "gcs",
         "group_id": DEST_GROUP,
         "config": {
-            "schema": schema, "table": "evidence",
+            "schema": schema, "table": table,
             "auth_type": "FIVETRAN_SERVICE_ACCOUNT",
             "bucket": EVIDENCE_BUCKET, "prefix": prefix,
             "file_type": "csv", "delimiter": ",", "compression": "infer",
@@ -306,24 +306,24 @@ def _create_connection_body(schema: str, prefix: str) -> dict:
     }
 
 
-async def create_gcs_connector_async(schema: str, prefix: str) -> dict:
+async def create_gcs_connector_async(schema: str, prefix: str, table: str = "evidence") -> dict:
     async with mcp_session(allow_writes=True) as mcp:
-        res = await mcp.call("create_connection", request_body=json.dumps(_create_connection_body(schema, prefix)))
+        res = await mcp.call("create_connection", request_body=json.dumps(_create_connection_body(schema, prefix, table)))
         return res if isinstance(res, dict) else {"code": "Error", "message": str(res)}
 
 
-def create_gcs_connector_rest(schema: str, prefix: str) -> dict:
-    return _rest_request("POST", "/connectors", _create_connection_body(schema, prefix))
+def create_gcs_connector_rest(schema: str, prefix: str, table: str = "evidence") -> dict:
+    return _rest_request("POST", "/connectors", _create_connection_body(schema, prefix, table))
 
 
-def create_gcs_connector(schema: str, prefix: str) -> dict:
+def create_gcs_connector(schema: str, prefix: str, table: str = "evidence") -> dict:
     """Create a new GCS->BigQuery connector via the MCP (CRUD: create); REST fallback.
     Returns the Fivetran response; the new connection id is at data.id."""
     _invalidate_freshness()
     try:
-        return asyncio.run(create_gcs_connector_async(schema, prefix))
+        return asyncio.run(create_gcs_connector_async(schema, prefix, table))
     except Exception:
-        return create_gcs_connector_rest(schema, prefix)
+        return create_gcs_connector_rest(schema, prefix, table)
 
 
 def delete_connector(connection_id: str) -> dict:

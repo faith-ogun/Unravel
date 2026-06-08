@@ -35,6 +35,32 @@ from .acmg import EvidenceItem, Ledger, Strength
 PROJECT = "unravel-ra"
 EVIDENCE_VIEW = f"{PROJECT}.evidence.variant_evidence"
 
+# The Fivetran-synced source tables the curated view unifies (the AI data plane).
+EVIDENCE_SOURCES = [
+    f"{PROJECT}.clinvar.variant_summary",
+    f"{PROJECT}.gnomad.allele_frequency",
+    f"{PROJECT}.alphamissense.scores",
+]
+
+
+def warehouse_query(key: "VariantKey | None" = None) -> str:
+    """The BigQuery the agents run against the Fivetran-synced view. With a key,
+    the parameters are filled in (for transparent display in the UI)."""
+    if key is None:
+        return (f"SELECT * FROM `{EVIDENCE_VIEW}`\n"
+                "WHERE chromosome = @chrom AND position = @pos\n"
+                "  AND reference_allele = @ref AND alternate_allele = @alt\nLIMIT 1")
+    return (f"SELECT * FROM `{EVIDENCE_VIEW}`\n"
+            f"WHERE chromosome = {key.chromosome} AND position = {key.position}\n"
+            f"  AND reference_allele = '{key.reference_allele}'\n"
+            f"  AND alternate_allele = '{key.alternate_allele}'\nLIMIT 1")
+
+
+def warehouse_info() -> dict:
+    """Describe the curated AI data plane: the view, its Fivetran-synced sources,
+    and the canonical query the agents run."""
+    return {"view": EVIDENCE_VIEW, "sources": EVIDENCE_SOURCES, "query": warehouse_query()}
+
 # --- gnomAD frequency thresholds (ACMG PM2 / BS1 / BA1) -------------------------
 # General-purpose cutoffs. ClinGen gene-specific VCEPs (e.g. the InSiGHT/MMR panel
 # for the Lynch genes) tune BS1/BA1 per gene; these defaults are conservative and

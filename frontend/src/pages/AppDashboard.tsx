@@ -5,10 +5,10 @@ import {
 } from 'lucide-react';
 import {
   getCohort, getFreshness, resync, pauseConnector, runLoopStream, getStructural,
-  getOnboardStatus, onboardGene,
+  getOnboardStatus, onboardGene, getWarehouseInfo,
   type CohortRow, type Feed, type Adjudication, type ResolutionPlan,
   type CascadeResult, type StewardResult, type Structural, type LoopStreamEvent,
-  type OnboardStatus,
+  type OnboardStatus, type WarehouseInfo,
 } from '../api';
 import PedigreeView from '../dash/PedigreeView';
 import GraphView from '../dash/GraphView';
@@ -81,6 +81,7 @@ export default function AppDashboard() {
   const [onboardStatus, setOnboardStatus] = useState<OnboardStatus | null>(null);
   const [onboarding, setOnboarding] = useState<string | null>(null);
   const [pendingOnboard, setPendingOnboard] = useState<string | null>(null);
+  const [warehouse, setWarehouse] = useState<WarehouseInfo | null>(null);
   const [sel, setSel] = useState<CohortRow | null>(null);
 
   const [nodes, setNodes] = useState<Record<Agent, NodeState>>({
@@ -103,6 +104,7 @@ export default function AppDashboard() {
     getCohort().then(setCohort).catch((e) => setErr(String(e.message || e)));
     getFreshness().then(setFeeds).catch(() => setFeeds([]));
     getOnboardStatus().then(setOnboardStatus).catch(() => {});
+    getWarehouseInfo().then(setWarehouse).catch(() => {});
   }, []);
   useEffect(() => { logRef.current?.scrollTo({ top: 1e6 }); }, [log]);
 
@@ -328,7 +330,7 @@ export default function AppDashboard() {
 
           {view === 'pedigree' && cohort && <PedigreeView patientId={pid} cohort={cohort} />}
           {view === 'graph' && <GraphView patientId={pid} cohort={cohort} onPick={selectPatient} />}
-          {view === 'explorer' && <ExplorerView feeds={feeds} events={events} resyncing={resyncing} pausing={pausing} onResync={doResync} onPause={doPause} onboard={onboardStatus} onboarding={onboarding} onOnboard={requestOnboard} />}
+          {view === 'explorer' && <ExplorerView feeds={feeds} events={events} resyncing={resyncing} pausing={pausing} onResync={doResync} onPause={doPause} onboard={onboardStatus} onboarding={onboarding} onOnboard={requestOnboard} warehouse={warehouse} />}
           {view === 'audit' && <AuditView cohort={cohort} events={events} />}
           {view === 'add' && cohort && <AddPatientView cohort={cohort} onAdded={refreshCohort} />}
 
@@ -453,6 +455,14 @@ export default function AppDashboard() {
                   <div style={{ marginTop: '1rem', paddingTop: '.9rem', borderTop: '1px solid var(--line)' }}>
                     <PosteriorBreakdown breakdown={sel.breakdown} />
                   </div>
+                )}
+                {sel.warehouse_sql && (
+                  <details style={{ marginTop: '.9rem' }}>
+                    <summary style={{ ...mono({ fontSize: '.66rem', color: 'var(--faint)' }), cursor: 'pointer' }}>
+                      BigQuery query the agents ran · {sel.source === 'live' ? 'served live from source APIs' : 'Fivetran-synced warehouse'}
+                    </summary>
+                    <pre style={{ ...mono({ fontSize: '.64rem' }), color: 'var(--muted)', background: 'var(--paper)', border: '1px solid var(--line)', borderRadius: 8, padding: '.6rem .7rem', marginTop: '.4rem', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.5 }}>{sel.warehouse_sql}</pre>
+                  </details>
                 )}
               </div>
 
@@ -604,10 +614,11 @@ function ViewIntro({ icon: Icon, title, body }: { icon: typeof Server; title: st
   );
 }
 
-function ExplorerView({ feeds, events, resyncing, pausing, onResync, onPause, onboard, onboarding, onOnboard }: {
+function ExplorerView({ feeds, events, resyncing, pausing, onResync, onPause, onboard, onboarding, onOnboard, warehouse }: {
   feeds: Feed[] | null; events: AuditEvent[]; resyncing: string | null; pausing: string | null;
   onResync: (f: Feed) => void; onPause: (f: Feed, paused: boolean) => void;
   onboard: OnboardStatus | null; onboarding: string | null; onOnboard: (gene: string) => void;
+  warehouse: WarehouseInfo | null;
 }) {
   const fivetranEvents = events.filter((e) => e.cat === 'fivetran');
   const fresh = (feeds ?? []).filter((f) => !f.is_stale && !f.paused).length;
@@ -615,6 +626,23 @@ function ExplorerView({ feeds, events, resyncing, pausing, onResync, onPause, on
     <div style={{ display: 'grid', gap: '1rem' }}>
       <ViewIntro icon={Server} title="Data explorer · Fivetran + BigQuery"
         body="The evidence commons, kept fresh in BigQuery by Fivetran. Check connector health and run targeted re-syncs, pauses and resumes through the Fivetran MCP server (CRUD on live connectors)." />
+
+      {warehouse && (
+        <div style={card}>
+          <div style={eyebrow}>Curated AI data plane · BigQuery view</div>
+          <div style={{ fontSize: '.76rem', color: 'var(--muted)', marginTop: '.3rem' }}>
+            Fivetran lands the raw sources in BigQuery; a curated view models them into the single table the five agents query. The agents reason over the data plane, not raw feeds.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap', marginTop: '.7rem' }}>
+            {warehouse.sources.map((s) => (
+              <span key={s} style={mono({ fontSize: '.66rem', color: 'var(--muted)', background: 'var(--paper-2)', padding: '.2rem .5rem', borderRadius: 6 })}>{s.split('.').slice(1).join('.')}</span>
+            ))}
+            <span style={{ color: 'var(--faint)' }}>→</span>
+            <span style={mono({ fontSize: '.68rem', color: 'var(--primary)', background: 'var(--primary-soft)', padding: '.2rem .5rem', borderRadius: 6, fontWeight: 600 })}>{warehouse.view.split('.').slice(1).join('.')}</span>
+          </div>
+          <pre style={{ ...mono({ fontSize: '.66rem' }), color: 'var(--ink)', background: 'var(--paper)', border: '1px solid var(--line)', borderRadius: 8, padding: '.7rem .8rem', marginTop: '.7rem', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.5 }}>{warehouse.query}</pre>
+        </div>
+      )}
 
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '.4rem' }}>

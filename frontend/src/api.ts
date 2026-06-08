@@ -81,8 +81,16 @@ export interface CohortRow {
   ancestry: string | null;
   ancestry_downweighted: boolean;
   source?: string; // "warehouse" (Fivetran/BigQuery) or "live" (public commons)
+  warehouse_sql?: string;
   cited: string[];
   breakdown: PosteriorBreakdown;
+}
+
+export interface WarehouseInfo { view: string; sources: string[]; query: string; }
+export async function getWarehouseInfo(): Promise<WarehouseInfo> {
+  const res = await fetch(`${BASE}/warehouse`);
+  if (!res.ok) throw new Error(await detail(res));
+  return res.json();
 }
 
 export interface Verdict {

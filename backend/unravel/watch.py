@@ -20,7 +20,7 @@ from __future__ import annotations
 from . import registry
 from .acmg import posterior_breakdown, score_posterior
 from .detection import _gid, detect_reclassifications
-from .evidence import EVIDENCE_VIEW, build_evidence_ledger
+from .evidence import EVIDENCE_VIEW, build_evidence_ledger, warehouse_query
 
 
 def _patient_name(patient: dict) -> str:
@@ -138,6 +138,7 @@ def cohort_overview(client=None) -> list[dict]:
             "ancestry": registry.patient_ancestry(patient),
             "ancestry_downweighted": ur,
             "source": ctx.source,
+            "warehouse_sql": warehouse_query(key),
             "cited": post.cited_lines(),
             "breakdown": posterior_breakdown(ctx.ledger),
         })

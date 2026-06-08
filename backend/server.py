@@ -168,6 +168,14 @@ def fivetran_pause(connection_id: str, paused: bool) -> dict:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
 
+@app.get("/api/warehouse")
+def warehouse() -> dict:
+    """The curated AI data plane: the BigQuery view, the Fivetran-synced source
+    tables it unifies, and the canonical query the agents run."""
+    from unravel.evidence import warehouse_info
+    return warehouse_info()
+
+
 @app.get("/api/onboard/status")
 def onboard_status() -> dict:
     """Per-gene live-lookup counts + onboarding recommendations."""
