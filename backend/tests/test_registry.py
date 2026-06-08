@@ -6,11 +6,12 @@ from unravel.evidence import VariantKey
 
 def test_cohort_shape():
     res = registry.build_resources()
-    # one Observation per carrier; at least the hero, silent Dianes, trap,
-    # deceased carrier, and benign filler.
-    assert len(res["Observation"]) == 10
-    assert len(res["Patient"]) == 14
-    assert len(res["FamilyMemberHistory"]) == 2
+    # The trimmed demo cohort: five carriers (Diane, Mei, Thomas, Eric, Grace),
+    # each with a real family, so only five Observations but many Patients +
+    # FamilyMemberHistory entries.
+    assert len(res["Observation"]) == 5
+    assert len(res["Patient"]) == 13
+    assert len(res["FamilyMemberHistory"]) == 6
 
 
 def test_proband_and_relatives():
@@ -33,8 +34,9 @@ def test_silent_dianes_share_the_hero_variant():
     obs = registry.build_resources()["Observation"]
     carriers = [o["subject"]["reference"] for o in obs
                 if registry.observation_variant(o) == registry.HERO.key]
-    # Diane plus three silent carriers.
-    assert len(carriers) == 4
+    # Diane plus Mei Tanaka (the equity arm) carry the same hero variant.
+    assert len(carriers) == 2
+    assert {"Patient/diane-marchetti", "Patient/mei-tanaka"} == set(carriers)
 
 
 def test_deceased_carrier_present():

@@ -100,6 +100,9 @@ export default function AppDashboard() {
     setSel(r);
     setNodes({ Watcher: 'idle', Adjudicator: 'idle', Planner: 'idle', Cascade: 'idle', Steward: 'idle' });
     setAdj(null); setPlan(null); setCasc(null); setStew(null); setStruc(null); setLog([]);
+    // the evidence dossier (3D structure) is available for ANY patient, not only
+    // reclassified ones, so fetch it on select rather than waiting for the loop.
+    if (r.hgvs_p) getStructural(r.gene, r.hgvs_p).then(setStruc).catch(() => {});
   }
 
   async function doResync(f: Feed) {
@@ -217,7 +220,7 @@ export default function AppDashboard() {
   const refreshCohort = () => getCohort().then(setCohort).catch(() => {});
 
   return (
-    <main style={{ maxWidth: 1320, margin: '0 auto', padding: '1.4rem 1.6rem 4rem' }}>
+    <main style={{ maxWidth: 1320, margin: '0 auto', padding: '1.4rem 1.6rem 4rem', overflowX: 'clip' }}>
       <style>{`
         @keyframes uvpulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }
         @keyframes uvspin { to { transform: rotate(360deg) } }
@@ -225,15 +228,18 @@ export default function AppDashboard() {
         .uv-row { transition: box-shadow .15s ease, background .15s ease; }
         .uv-row:hover { background: var(--paper-2) !important; box-shadow: var(--sh-sm); }
         .uv-log > div { animation: uvfade .25s ease both; }
+        .uv-workgrid > * { min-width: 0; }
+        .uv-workgrid > * > * { min-width: 0; max-width: 100%; }
+        @media (max-width: 1024px) { .uv-workgrid { grid-template-columns: 1fr !important; } }
       `}</style>
 
       {/* header + source rail */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <div style={eyebrow}>Variant commons watch</div>
-          <h1 style={{ fontSize: '1.7rem', margin: '.15rem 0' }}>MLH1 / Lynch surveillance</h1>
+          <h1 style={{ fontSize: '1.7rem', margin: '.15rem 0' }}>Variant reclassification surveillance</h1>
           <div style={{ fontSize: '.82rem', color: 'var(--muted)' }}>
-            Live engine: evidence from BigQuery, verdicts from Gemini 3.1 Pro, structure from AlphaFold. Synthetic cohort.
+            Any gene, any variant: onboarded genes are served from the Fivetran warehouse, anything else live from the public commons. Verdicts from Gemini 3.1 Pro, structure from AlphaFold. Synthetic cohort.
           </div>
         </div>
         <div style={{ ...card, padding: '.7rem .8rem', minWidth: 330 }}>
@@ -272,9 +278,9 @@ export default function AppDashboard() {
             <Metric n={feeds ? `${feeds.filter((f) => !f.is_stale).length}/${feeds.length}` : '…'} label="Fivetran feeds fresh" tone="benign" />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,340px) minmax(0,1fr)', gap: '1.1rem', alignItems: 'start' }}>
+          <div className="uv-workgrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,340px) minmax(0,1fr)', gap: '1.1rem', alignItems: 'start' }}>
         {/* worklist */}
-        <div style={{ ...card, padding: '.9rem' }}>
+        <div style={{ ...card, padding: '.9rem', minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <div style={eyebrow}>Watchlist · ranked by urgency</div>
             <span style={{ ...mono({ fontSize: '.66rem' }), color: 'var(--faint)' }}>{cohort?.length ?? 0} cases</span>
@@ -297,8 +303,11 @@ export default function AppDashboard() {
                     <span style={{ fontWeight: 700, fontSize: '.88rem' }}>{r.patient_name}{r.deceased ? ' †' : ''}</span>
                     <span style={tag(dc.fg, dc.bg)}>{dc.label}</span>
                   </div>
-                  <div style={{ ...mono({ fontSize: '.7rem' }), color: 'var(--muted)', marginTop: '.15rem' }}>
-                    {r.gene} {r.hgvs_c} · {r.review_stars}★
+                  <div style={{ ...mono({ fontSize: '.7rem' }), color: 'var(--muted)', marginTop: '.15rem', display: 'flex', alignItems: 'center', gap: '.4rem', flexWrap: 'wrap' }}>
+                    <span>{r.gene} {r.hgvs_c} · {r.review_stars}★</span>
+                    {r.source === 'live' && (
+                      <span style={tag('var(--thread)', 'var(--primary-soft)')} title="Resolved live from the public commons (gene not yet onboarded to the Fivetran warehouse)">live</span>
+                    )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginTop: '.35rem' }}>
                     <Gauge p={r.posterior} />
@@ -316,7 +325,7 @@ export default function AppDashboard() {
         </div>
 
         {/* case workup */}
-        <div style={{ display: 'grid', gap: '1rem' }}>
+        <div style={{ display: 'grid', gap: '1rem', minWidth: 0 }}>
           {!sel && <div style={{ ...card, color: 'var(--faint)' }}>Select a case from the watchlist to open the workup and run the agent loop.</div>}
 
           {sel && (
@@ -331,14 +340,20 @@ export default function AppDashboard() {
                     <div style={{ fontSize: '.8rem', color: 'var(--muted)', marginTop: '.3rem' }}>
                       registry: <b>{sel.recorded_class}</b> → ClinVar now: <b style={{ color: bandColor(sel.current_class || '').fg }}>{sel.current_class}</b> ({sel.review_stars}★)
                     </div>
+                    <div style={{ fontSize: '.74rem', color: sel.reclassified ? 'var(--path-d)' : 'var(--muted)', marginTop: '.3rem', display: 'flex', alignItems: 'center', gap: '.35rem' }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: sel.reclassified ? 'var(--path)' : 'var(--benign)', animation: 'uvpulse 2.2s ease-in-out infinite' }} />
+                      {sel.reclassified
+                        ? `Reclassified since the registry record — ${sel.direction} flagged for review.`
+                        : 'Under active surveillance — no change since the registry record. Re-runs re-check the live evidence.'}
+                    </div>
                   </div>
-                  <button onClick={() => runWatch()} disabled={running || !sel.reclassified}
+                  <button onClick={() => runWatch()} disabled={running}
                     style={{
-                      background: sel.reclassified ? 'var(--thread)' : 'var(--line-2)', color: '#fff', fontWeight: 700,
+                      background: 'var(--thread)', color: '#fff', fontWeight: 700,
                       borderRadius: 9, padding: '.6rem 1.1rem', fontSize: '.85rem', opacity: running ? .7 : 1,
-                      cursor: sel.reclassified ? 'pointer' : 'default',
+                      cursor: running ? 'default' : 'pointer',
                     }}>
-                    {running ? 'Running loop…' : sel.reclassified ? '▶ Run watch loop' : 'no change to act on'}
+                    {running ? 'Running loop…' : sel.reclassified ? '▶ Run watch loop' : '▶ Run surveillance check'}
                   </button>
                 </div>
 
@@ -420,16 +435,29 @@ export default function AppDashboard() {
               {struc && (
                 <OutCard title="Structural story · AlphaFold + AlphaMissense" edge="var(--thread-d)">
                   <p style={{ fontSize: '.86rem', marginBottom: '.5rem' }}>{struc.summary}</p>
-                  <StructureViewer structural={struc} />
-                  <div style={{ display: 'flex', gap: '1.4rem', flexWrap: 'wrap', marginTop: '.7rem' }}>
-                    <Stat n={`${struc.enrichment}x`} label="enrichment" tone="path" />
-                    <Stat n={struc.variant_mean_am.toFixed(2)} label="residue AM" />
-                    <Stat n={`${struc.variant_plddt}`} label="pLDDT" />
-                    <Stat n={`${struc.n_neighbours}`} label={`neighbours (${struc.radius_angstrom}A)`} />
-                  </div>
-                  <a href={struc.structure_page} target="_blank" rel="noreferrer" style={{ fontSize: '.82rem', fontWeight: 600, display: 'inline-block', marginTop: '.5rem' }}>
-                    View on AlphaFold DB ({struc.uniprot}) &rarr;
-                  </a>
+                  {struc.structure_available === false ? (
+                    <div style={{ ...tag('var(--muted)', 'var(--paper-2)'), whiteSpace: 'normal', fontSize: '.78rem', padding: '.6rem .7rem', borderRadius: 8 }}>
+                      AlphaFold has no single 3D model for {struc.gene} (the protein exceeds the prediction-length limit). The verdict still rests on population, in-silico and ClinVar evidence.
+                    </div>
+                  ) : (
+                    <>
+                      <StructureViewer structural={struc} />
+                      <div style={{ display: 'flex', gap: '1.4rem', flexWrap: 'wrap', marginTop: '.7rem' }}>
+                        {struc.am_available !== false && <Stat n={`${struc.enrichment}x`} label="enrichment" tone="path" />}
+                        {struc.am_available !== false && <Stat n={struc.variant_mean_am.toFixed(2)} label="residue AM" />}
+                        <Stat n={struc.variant_plddt != null ? `${struc.variant_plddt}` : 'n/a'} label="pLDDT" />
+                        <Stat n={`${struc.n_neighbours}`} label={`neighbours (${struc.radius_angstrom}A)`} />
+                      </div>
+                      {struc.am_available === false && (
+                        <div style={{ fontSize: '.72rem', color: 'var(--faint)', marginTop: '.5rem' }}>
+                          Per-residue AlphaMissense enrichment is computed for onboarded genes; this gene is served live, so the structure is shown without the enrichment overlay.
+                        </div>
+                      )}
+                      <a href={struc.structure_page} target="_blank" rel="noreferrer" style={{ fontSize: '.82rem', fontWeight: 600, display: 'inline-block', marginTop: '.5rem' }}>
+                        View on AlphaFold DB ({struc.uniprot}) &rarr;
+                      </a>
+                    </>
+                  )}
                 </OutCard>
               )}
 

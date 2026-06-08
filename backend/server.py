@@ -113,7 +113,10 @@ class NewPatient(BaseModel):
     relationship: str | None = None
     gene: str | None = None
     hgvs_c: str | None = None
+    hgvs_p: str | None = None
     gid: str | None = None
+    variant_query: str | None = None
+    ancestry: str | None = None
     recorded_class: str = "Uncertain significance"
 
 
@@ -165,6 +168,8 @@ def structural(gene: str, hgvs_p: str | None = None, residue: int | None = None)
             "uniprot": sc.uniprot,
             "residue": sc.residue,
             "summary": sc.summary(),
+            "am_available": sc.am_available,
+            "structure_available": sc.structure_available,
             "structure_url": sc.structure_url,
             "structure_page": sc.structure_page,
             "structure_source": sc.structure_source,
@@ -176,7 +181,9 @@ def structural(gene: str, hgvs_p: str | None = None, residue: int | None = None)
             "n_neighbours": sc.n_neighbours,
             "radius_angstrom": sc.radius_angstrom,
             "pathogenic_neighbours": sorted(
-                sc.pathogenic_neighbours, key=lambda n: -n["mean_am"])[:8],
+                sc.pathogenic_neighbours,
+                key=lambda n: (n["mean_am"] is not None, n["mean_am"] or 0.0),
+                reverse=True)[:8],
             "heatmap": sc.heatmap,
         }
     except Exception as e:

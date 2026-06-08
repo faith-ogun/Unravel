@@ -66,10 +66,10 @@ def test_planner_as_dict_shape():
 
 def test_match_affected_patients_finds_carriers_and_relatives():
     match = registry.match_affected_patients(HERO.key, data=registry.build_resources())
-    # HERO carriers: Diane + 3 silent Dianes; Diane's 3 relatives
+    # HERO carriers: Diane + Mei (the equity arm); their five at-risk relatives
     living = [c for c in match["carriers"] if not c.get("deceased")]
-    assert len(living) == 4
-    assert len(match["relatives"]) == 3
+    assert len(living) == 2
+    assert len(match["relatives"]) == 5
 
 
 # --- watch helpers (no BigQuery) -----------------------------------------------

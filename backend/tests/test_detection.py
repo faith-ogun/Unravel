@@ -33,8 +33,7 @@ def test_detects_hero_and_silent_dianes_as_escalations():
     dets = detect_reclassifications(data=data, current=_current_for(data))
     hero_escalations = [d for d in dets
                         if d.variant == registry.HERO.key and d.is_escalation]
-    assert {d.patient_id for d in hero_escalations} == {
-        "diane-marchetti", "mei-tanaka", "rajesh-patel", "sarah-cohen"}
+    assert {d.patient_id for d in hero_escalations} == {"diane-marchetti", "mei-tanaka"}
 
 
 def test_downgrade_is_flagged_but_not_escalation():
@@ -45,13 +44,16 @@ def test_downgrade_is_flagged_but_not_escalation():
     assert not kemi.is_escalation
 
 
-def test_unchanged_benign_filler_not_flagged():
+def test_untested_relatives_not_flagged():
+    # At-risk relatives carry no Observation, so they are never flagged as
+    # reclassifications; only the tested carriers are.
     data = _data()
     dets = detect_reclassifications(data=data, current=_current_for(data))
     flagged = {d.patient_id for d in dets}
-    assert "lucia-romero" not in flagged
-    assert "wei-chen" not in flagged
-    assert "hannah-schmidt" not in flagged
+    assert flagged == {"diane-marchetti", "mei-tanaka", "thomas-nguyen",
+                       "eric-larsson", "grace-mensah"}
+    for relative in ("laura-marchetti", "kenji-tanaka", "naomi-mensah", "anna-larsson"):
+        assert relative not in flagged
 
 
 def test_trap_is_detected_for_the_adjudicator_to_withhold():
@@ -74,10 +76,11 @@ def test_since_filters_out_records_newer_than_floor():
 def test_match_affected_patients_returns_carriers_and_relatives():
     data = _data()
     m = registry.match_affected_patients(registry.HERO.key, data=data)
-    assert {c["patient"]["id"] for c in m["carriers"]} == {
-        "diane-marchetti", "mei-tanaka", "rajesh-patel", "sarah-cohen"}
+    assert {c["patient"]["id"] for c in m["carriers"]} == {"diane-marchetti", "mei-tanaka"}
+    # both carriers' at-risk relatives are surfaced for the cascade
     assert {r["patient"]["id"] for r in m["relatives"]} == {
-        "sofia-marchetti", "marco-marchetti", "laura-marchetti"}
+        "sofia-marchetti", "marco-marchetti", "laura-marchetti",
+        "kenji-tanaka", "aiko-tanaka"}
 
 
 def test_match_includes_deceased_carrier_flag():

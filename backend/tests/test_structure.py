@@ -27,6 +27,7 @@ def test_neighbour_clustering_math(monkeypatch):
     ca = {1: (0.0, 0.0, 0.0, 90.0), 2: (3.0, 0.0, 0.0, 88.0),
           3: (20.0, 0.0, 0.0, 70.0), 4: (21.0, 0.0, 0.0, 71.0)}
     monkeypatch.setattr(structure, "_load_residue_am", lambda gene: am)
+    monkeypatch.setattr(structure, "_af_prediction", lambda u: {"pdbUrl": "http://x/model.pdb"})
     monkeypatch.setattr(structure, "_alphafold_pdb", lambda u: (Path("/dev/null"), "http://x"))
     monkeypatch.setattr(structure, "_parse_ca", lambda p: ca)
 

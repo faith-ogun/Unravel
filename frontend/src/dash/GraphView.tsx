@@ -142,7 +142,7 @@ export default function GraphView({ patientId }: { patientId: string }) {
             <ForceGraph2D
               ref={fgRef}
               graphData={data}
-              width={panelOpen ? Math.max(400, width - 320) : width}
+              width={width}
               height={580}
               backgroundColor="#0e1119"
               cooldownTicks={250}
@@ -267,7 +267,8 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }) 
   const color = COLOR[node.type] ?? '#8aa';
   return (
     <div style={{
-      width: 310, flexShrink: 0, background: '#13161f', borderLeft: '1px solid #20263a',
+      position: 'absolute', top: 0, right: 0, bottom: 0, zIndex: 5,
+      width: 310, maxWidth: '85%', flexShrink: 0, background: 'rgba(19,22,31,0.97)', borderLeft: '1px solid #20263a',
       padding: '1rem', overflowY: 'auto', maxHeight: 580,
       animation: 'uvfade .25s ease both',
     }}>

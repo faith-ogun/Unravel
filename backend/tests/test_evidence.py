@@ -105,10 +105,33 @@ def test_family_segregation_tips_trap_over():
     assert result.is_actionable
 
 
-def test_missing_variant_returns_not_found():
+def test_missing_variant_returns_not_found(monkeypatch):
+    # Warehouse miss AND live miss -> genuinely not found. Mock the live path so
+    # the unit test stays offline.
+    import unravel.live_evidence as live
+    monkeypatch.setattr(live, "fetch_live_row", lambda key: None)
     ctx = build_evidence_ledger(VariantKey("3", 1, "A", "T"), row=None,
                                 client=_NoClient())
     assert not ctx.found
+    assert ctx.source == "live"  # we did attempt the live fallback
+
+
+def test_warehouse_miss_falls_back_to_live(monkeypatch):
+    # An out-of-coverage variant (warehouse miss) is served live from the public
+    # commons, tagged with provenance, and scores through the same engine.
+    import unravel.live_evidence as live
+    monkeypatch.setattr(live, "fetch_live_row", lambda key: {
+        "gene_symbol": "BRCA1", "clinical_significance": "Likely pathogenic",
+        "review_stars": 2, "gnomad_af": None,
+        "am_pathogenicity": 0.93, "am_class": "likely_pathogenic",
+        "consequence": "missense_variant", "sift_prediction": "deleterious",
+    })
+    ctx = build_evidence_ledger(VariantKey("17", 43063930, "G", "A"), row=None,
+                                client=_NoClient())
+    assert ctx.found
+    assert ctx.source == "live"
+    assert ctx.gene_symbol == "BRCA1"
+    assert any(i.code == "PP3" for i in ctx.ledger.items)
 
 
 class _NoClient:

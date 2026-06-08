@@ -198,46 +198,62 @@ def build_resources() -> dict[str, list[dict]]:
     histories.append(_family_history("fmh-diane-aunt", "diane-marchetti", "MAUNT",
                                      "maternal aunt", condition="Endometrial cancer", onset_age=52))
 
-    # 2) Three "silent Dianes": same hero variant, recorded VUS, family never recontacted.
-    silent = [
-        ("mei-tanaka", "Tanaka", "Mei", "female", "1965-02-11", "2017-08-01"),
-        ("rajesh-patel", "Patel", "Rajesh", "male", "1979-05-23", "2020-01-14"),
-        ("sarah-cohen", "Cohen", "Sarah", "female", "1983-12-05", "2021-06-30"),
-    ]
-    for pid, fam, giv, sex, dob, rec in silent:
-        patients.append(_patient(pid, fam, giv, sex, dob, role="carrier",
-                                 conditions=["Colorectal cancer"]))
-        observations.append(_observation(f"obs-{pid}", pid, HERO,
-                                         "Uncertain significance", rec))
+    # 2) Mei Tanaka: the same hero variant as Diane, recorded VUS, never
+    #    recontacted. East Asian ancestry, so the predictor down-weighting (equity)
+    #    arm runs on identical evidence to Diane. Her own family makes the cascade
+    #    real on the second arm too.
+    patients.append(_patient(
+        "mei-tanaka", "Tanaka", "Mei", "female", "1965-02-11",
+        role="proband", conditions=["Colorectal cancer (dx 2017, age 52)"],
+        email="mei.tanaka@example.com", phone="+1-415-555-0173"))
+    observations.append(_observation(
+        "obs-mei-tanaka", "mei-tanaka", HERO, "Uncertain significance", "2017-08-01"))
+    patients.append(_patient("kenji-tanaka", "Tanaka", "Kenji", "male", "1992-03-17",
+                             relative_of="mei-tanaka", relationship="son",
+                             email="kenji.tanaka@example.com"))
+    patients.append(_patient("aiko-tanaka", "Tanaka", "Aiko", "female", "1968-07-29",
+                             relative_of="mei-tanaka", relationship="sister"))
+    histories.append(_family_history("fmh-mei-mother", "mei-tanaka", "MTH", "mother",
+                                     deceased=True, condition="Colorectal cancer", onset_age=55))
 
     # 3) Deceased carrier (Steward ethics branch) with a living at-risk child.
     patients.append(_patient("thomas-nguyen", "Nguyen", "Thomas", "male", "1952-07-19",
-                             deceased=True, role="carrier",
-                             conditions=["Colorectal cancer (deceased)"]))
-    observations.append(_observation("obs-thomas", "thomas-nguyen", MSH2_LP,
+                             deceased=True, role="proband",
+                             conditions=["Colorectal cancer (deceased 2021)"]))
+    observations.append(_observation("obs-thomas-nguyen", "thomas-nguyen", MSH2_LP,
                                      "Uncertain significance", "2015-04-10"))
     patients.append(_patient("david-nguyen", "Nguyen", "David", "male", "1986-03-08",
                              relative_of="thomas-nguyen", relationship="son",
                              email="david.nguyen@example.com"))
+    histories.append(_family_history("fmh-thomas-sister", "thomas-nguyen", "SIS", "sister",
+                                     condition="Endometrial cancer", onset_age=58))
 
-    # 4) The 1-star trap carrier: tempting variant, must be withheld.
+    # 4) The 1-star trap carrier: a tempting low-confidence assertion that must be
+    #    withheld. A daughter is at risk, which is exactly why withholding a thin
+    #    claim (rather than alarming the family) is the careful call.
     patients.append(_patient("eric-larsson", "Larsson", "Eric", "male", "1975-10-02",
-                             role="carrier"))
-    observations.append(_observation("obs-eric", "eric-larsson", TRAP,
+                             role="proband", conditions=["Colorectal cancer (dx 2018, age 43)"],
+                             email="eric.larsson@example.com"))
+    observations.append(_observation("obs-eric-larsson", "eric-larsson", TRAP,
                                      "Uncertain significance", "2018-11-22"))
+    patients.append(_patient("anna-larsson", "Larsson", "Anna", "female", "2003-05-14",
+                             relative_of="eric-larsson", relationship="daughter"))
+    histories.append(_family_history("fmh-eric-father", "eric-larsson", "FTH", "father",
+                                     deceased=True, condition="Colorectal cancer", onset_age=61))
 
-    # 5) Benign / unrelated cohort filler (no action expected).
-    filler = [
-        ("lucia-romero", "Romero", "Lucia", "female", "1990-01-15", MLH1_BENIGN, "Benign", "2019-02-01"),
-        ("wei-chen", "Chen", "Wei", "male", "1972-08-09", MSH6_BENIGN, "Benign", "2020-09-12"),
-        ("hannah-schmidt", "Schmidt", "Hannah", "female", "1988-04-27", EPCAM_BENIGN, "Benign", "2021-03-03"),
-        # recorded VUS but now benign: a downgrade, not an alarm
-        ("grace-mensah", "Mensah", "Grace", "female", "1969-06-18", MLH1_BENIGN,
-         "Uncertain significance", "2016-05-20"),
-    ]
-    for pid, fam, giv, sex, dob, variant, rec_class, rec_date in filler:
-        patients.append(_patient(pid, fam, giv, sex, dob))
-        observations.append(_observation(f"obs-{pid}", pid, variant, rec_class, rec_date))
+    # 5) Grace Mensah: a recorded VUS that the evidence has since reclassified
+    #    BENIGN, the opposite arm. African ancestry. The right action is
+    #    reassurance and closing surveillance, not an alarm.
+    patients.append(_patient("grace-mensah", "Mensah", "Grace", "female", "1969-06-18",
+                             role="proband", conditions=["Polyp surveillance (since 2016)"],
+                             email="grace.mensah@example.com"))
+    observations.append(_observation("obs-grace-mensah", "grace-mensah", MLH1_BENIGN,
+                                     "Uncertain significance", "2016-05-20"))
+    patients.append(_patient("naomi-mensah", "Mensah", "Naomi", "female", "1995-11-08",
+                             relative_of="grace-mensah", relationship="daughter",
+                             email="naomi.mensah@example.com"))
+    histories.append(_family_history("fmh-grace-aunt", "grace-mensah", "MAUNT",
+                                     "maternal aunt", condition="Colorectal cancer", onset_age=64))
 
     # Ancestry (additive metadata only; variants/classifications unchanged). Drives
     # the predictor down-weighting: a carrier of an under-represented ancestry has
@@ -246,10 +262,10 @@ def build_resources() -> dict[str, list[dict]]:
     ancestry_map = {
         "diane-marchetti": "European", "laura-marchetti": "European",
         "sofia-marchetti": "European", "marco-marchetti": "European",
-        "mei-tanaka": "East Asian", "rajesh-patel": "South Asian", "sarah-cohen": "European",
+        "mei-tanaka": "East Asian", "kenji-tanaka": "East Asian", "aiko-tanaka": "East Asian",
         "thomas-nguyen": "East Asian", "david-nguyen": "East Asian",
-        "eric-larsson": "European", "grace-mensah": "African",
-        "lucia-romero": "Hispanic", "wei-chen": "East Asian", "hannah-schmidt": "European",
+        "eric-larsson": "European", "anna-larsson": "European",
+        "grace-mensah": "African", "naomi-mensah": "African",
     }
     for p in patients:
         anc = ancestry_map.get(p["id"])
@@ -460,22 +476,45 @@ def add_patient(*, given: str, family: str, gender: str = "unknown", birth: str 
                 email: str | None = None, phone: str | None = None,
                 relative_of: str | None = None, relationship: str | None = None,
                 gene: str | None = None, hgvs_c: str | None = None, gid: str | None = None,
+                hgvs_p: str | None = None, variant_query: str | None = None,
+                ancestry: str | None = None,
                 recorded_class: str = "Uncertain significance", client=None) -> dict:
-    """Add a patient (and optional variant observation) to the Firestore registry."""
+    """Add a patient (and optional variant observation) to the Firestore registry.
+
+    A free-text `variant_query` (rsID, gene:c.HGVS, or chrom-pos-ref-alt) is
+    resolved to canonical GRCh38 coordinates + gene + protein change via Ensembl
+    VEP, so a clinician can enter any variant they found online and have it flow
+    through the same five-agent loop. Explicit gid/gene/hgvs_c (the one-click
+    family variant) takes precedence when supplied.
+    """
     client = client or get_client()
     pid = f"{given}-{family}".lower().replace(" ", "-")
+
+    resolved = None
+    if variant_query and not gid:
+        from .live_evidence import normalize_query
+        nv = normalize_query(variant_query)
+        if nv is None:
+            raise ValueError(
+                f"Could not resolve variant '{variant_query}'. Try gene:c.HGVS "
+                f"(e.g. BRCA1:c.5096G>A) or chrom-pos-ref-alt (e.g. 17-43063930-G-A).")
+        gid, gene, hgvs_c, hgvs_p = nv.gid, nv.gene or gene, nv.hgvs_c or hgvs_c, nv.hgvs_p or hgvs_p
+        resolved = {"gid": nv.gid, "gene": nv.gene, "hgvs_c": nv.hgvs_c,
+                    "hgvs_p": nv.hgvs_p, "consequence": nv.consequence}
+
     role = "carrier" if gid else None
     patient = _patient(pid, family, given, gender or "unknown", birth or "1980-01-01",
                        role=role, relative_of=relative_of, relationship=relationship,
                        email=email, phone=phone)
+    if ancestry:
+        patient.setdefault("extension", []).append({"url": ANCESTRY_URL, "valueString": ancestry})
     client.collection("Patient").document(pid).set(patient)
 
     obs_written = None
-    if gid and gene and hgvs_c:
-        chrom, pos, ref, alt = gid.split("-")
-        spec = VariantSpec(gid, gene, hgvs_c, "", recorded_class)
+    if gid and gene:
+        spec = VariantSpec(gid, gene, hgvs_c or "", hgvs_p or "", recorded_class)
         obs = _observation(f"obs-{pid}", pid, spec, recorded_class, "2024-01-01")
         client.collection("Observation").document(f"obs-{pid}").set(obs)
         obs_written = f"obs-{pid}"
 
-    return {"patient_id": pid, "observation": obs_written, "ok": True}
+    return {"patient_id": pid, "observation": obs_written, "ok": True, "resolved": resolved}

@@ -95,29 +95,49 @@ def cohort_overview(client=None) -> list[dict]:
         ctx = build_evidence_ledger(key, row=row, ancestry_underrepresented=ur)
         post = score_posterior(ctx.ledger)
         det = dets.get(pid)
+
+        # Onboarded (warehouse) variants get their current state from the batch
+        # query + the deterministic detector. An out-of-coverage variant resolved
+        # live has no warehouse row, so read its current state off the ledger
+        # context and compute the reclassification direction inline.
+        recorded_class = registry.recorded_classification(obs)
+        current_class = (row or {}).get("clinical_significance") or ctx.clinical_significance
+        review_stars = (row or {}).get("review_stars")
+        if review_stars is None:
+            review_stars = ctx.review_stars
+        if det is not None:
+            direction, reclassified = det.direction, True
+        elif row is None and ctx.found:
+            from .detection import _category, _direction
+            direction = _direction(_category(recorded_class), _category(current_class)) or "unchanged"
+            reclassified = direction != "unchanged"
+        else:
+            direction, reclassified = "unchanged", False
+
         out.append({
             "patient_id": pid,
             "patient_name": _patient_name(patients.get(pid, {})),
             "deceased": patients.get(pid, {}).get("deceasedBoolean", False),
-            "gene": registry.observation_field(obs, "48018-6"),
+            "gene": registry.observation_field(obs, "48018-6") or ctx.gene_symbol,
             "hgvs_c": registry.observation_field(obs, "48004-6"),
             "hgvs_p": registry.observation_field(obs, "48005-3"),
             "variant": key.label(),
-            "recorded_class": registry.recorded_classification(obs),
+            "recorded_class": recorded_class,
             "recorded_date": obs.get("effectiveDateTime"),
-            "current_class": (row or {}).get("clinical_significance"),
-            "review_stars": (row or {}).get("review_stars"),
-            "direction": det.direction if det else "unchanged",
-            "reclassified": det is not None,
+            "current_class": current_class,
+            "review_stars": review_stars,
+            "direction": direction,
+            "reclassified": reclassified,
             "points": post.points,
             "posterior": round(post.posterior, 4),
             "band": post.band.value,
             "points_to_actionable": post.points_to_actionable,
-            "gnomad_af": (row or {}).get("gnomad_af"),
-            "am_pathogenicity": (row or {}).get("am_pathogenicity"),
-            "am_class": (row or {}).get("am_class"),
+            "gnomad_af": (row or {}).get("gnomad_af") if row else ctx.gnomad_af,
+            "am_pathogenicity": (row or {}).get("am_pathogenicity") if row else ctx.am_pathogenicity,
+            "am_class": (row or {}).get("am_class") if row else ctx.am_class,
             "ancestry": registry.patient_ancestry(patient),
             "ancestry_downweighted": ur,
+            "source": ctx.source,
             "cited": post.cited_lines(),
             "breakdown": posterior_breakdown(ctx.ledger),
         })
@@ -179,23 +199,42 @@ def graph_patient(pid: str, *, client=None) -> dict:
     gene = r["gene"]
     hgvs_c = r["hgvs_c"]
     hgvs_p = r.get("hgvs_p") or ""
+    consequence = (ctx.consequence or "").replace("_", " ")
+    live = ctx.source == "live"
 
     add("variant", f"{gene} {hgvs_c}", "variant",
         meta=f"{r['current_class']} ({r['review_stars']}★)",
         size=2.0,
         detail=f"Protein change: {hgvs_p}. Posterior: {post.posterior:.2f} ({post.band.value}). Points: {post.points}.")
 
-    # -- gene node
-    add("gene", gene, "gene", meta="gene symbol", size=1.4,
-        detail=f"{gene} encodes a protein involved in DNA mismatch repair. Pathogenic variants in this gene are associated with Lynch syndrome (hereditary nonpolyposis colorectal cancer).")
+    # -- provenance: where this variant's evidence was served from. Onboarded genes
+    #    come from the Fivetran-synced warehouse; anything else is resolved live
+    #    from the public commons. Same engine either way (disease-agnostic).
+    if live:
+        add("provenance", "Live source", "source", meta="public commons", size=1.2,
+            detail=f"{gene} is not yet onboarded to the Fivetran warehouse, so its evidence is resolved live from the public commons (Ensembl VEP, gnomAD, ClinVar) at query time. The reasoning is identical to a warehoused variant; only the delivery differs.")
+    else:
+        add("provenance", "Fivetran warehouse", "source", meta="synced commons", size=1.2,
+            detail=f"{gene} is part of the onboarded commons: ClinVar, gnomAD and AlphaMissense are kept fresh in BigQuery by Fivetran connectors and queried in one round trip. The loop also checks each feed's freshness before ruling.")
+    link("variant", "provenance", weight=1.2, label="served via")
+
+    # -- gene node (disease-agnostic: the verdict is driven by evidence, not by the
+    #    gene's identity or a hard-coded syndrome list)
+    add("gene", gene, "gene", meta="affected gene", size=1.4,
+        detail=f"{gene} is the gene harbouring this variant ({hgvs_c}{f', {consequence}' if consequence else ''}). The classification is driven by population frequency, in-silico prediction and the ClinVar assertion, not by the gene's identity, so the same pipeline applies to any hereditary-cancer gene.")
     link("variant", "gene", label="in gene")
+
+    if consequence:
+        add("consequence", consequence, "evidence", meta="molecular effect",
+            detail=f"The variant's predicted molecular consequence is a {consequence}. Missense changes are the substrate for the AlphaMissense in-silico criterion; truncating changes recruit different evidence.")
+        link("gene", "consequence", label="effect")
 
     # -- protein node
     protein_label = f"{gene} protein"
     if ctx.am_pathogenicity is not None:
-        protein_detail = f"AlphaMissense pathogenicity for the variant residue: {ctx.am_pathogenicity:.3f} ({ctx.am_class}). The protein has domains critical for mismatch repair function."
+        protein_detail = f"AlphaMissense pathogenicity for the variant residue: {ctx.am_pathogenicity:.3f} ({ctx.am_class}). The folded structure (AlphaFold) places the residue in its 3D neighbourhood, testing whether it clusters with other high-pathogenicity positions."
     else:
-        protein_detail = "Protein structure available from AlphaFold DB."
+        protein_detail = "Protein structure available from AlphaFold DB; the residue's 3D neighbourhood contextualises the variant."
     add("protein", protein_label, "protein", meta="protein product", size=1.2, detail=protein_detail)
     link("gene", "protein", label="encodes")
 
@@ -281,6 +320,24 @@ def graph_patient(pid: str, *, client=None) -> dict:
                 meta="in-silico benign",
                 detail=f"AlphaMissense score {am:.3f} meets the BP4 criterion at Supporting strength. This computational evidence supports a benign interpretation.")
             link("am-score", "am-bp4", label="ACMG criterion")
+
+    # -- corroborating in-silico predictors (context only; never minted into the
+    #    ACMG ledger, so one computational signal is not double-counted)
+    for sub, label_, pred in (("sift", "SIFT", ctx.sift_prediction),
+                              ("polyphen", "PolyPhen-2", ctx.polyphen_prediction)):
+        if pred:
+            add(f"pred-{sub}", f"{label_}: {pred.replace('_', ' ')}", "evidence", meta="in-silico",
+                detail=f"{label_} predicts this substitution is '{pred.replace('_', ' ')}'. Shown as corroborating context only; just AlphaMissense is minted into the ACMG ledger, so a single computational signal never drives the verdict twice.")
+            link("protein", f"pred-{sub}", label="predicted by")
+
+    # -- ancestry / predictor-bias node: an under-represented ancestry down-weights
+    #    the AlphaMissense PP3 by one strength tier (bias mitigation)
+    _patient = next((p for p in r["data"]["Patient"] if p["id"] == pid), {})
+    ancestry = registry.patient_ancestry(_patient)
+    if ctx.ancestry_underrepresented and ancestry:
+        add("ancestry", f"{ancestry} ancestry", "warning", meta="predictor down-weighted",
+            detail=f"AlphaMissense is trained on European-ancestry-skewed data and performs unevenly across ancestries. This carrier's reported {ancestry} ancestry is under-represented, so the AlphaMissense PP3 is trusted one strength tier less and the verdict leans on ancestry-robust evidence (frequency, segregation, the ClinVar assertion).")
+        link("ancestry", "alphamissense", weight=1.2, label="down-weights")
 
     # -- AlphaFold branch
     add("alphafold", "AlphaFold", "source", meta="3D structure", size=1.2,

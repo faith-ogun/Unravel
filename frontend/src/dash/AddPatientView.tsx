@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { UserPlus, Check, Dna } from 'lucide-react';
+import { UserPlus, Check, Dna, Search } from 'lucide-react';
 import { addPatient, type CohortRow } from '../api';
 import { card, mono } from './ui';
 
@@ -31,10 +31,12 @@ function Section({ n, title, children }: { n: string; title: string; children: R
   );
 }
 
+const ANCESTRIES = ['', 'European', 'African', 'East Asian', 'South Asian', 'Hispanic', 'Ashkenazi Jewish', 'Middle Eastern'];
+
 export default function AddPatientView({ cohort, onAdded }: { cohort: CohortRow[]; onAdded: () => void }) {
   const [f, setF] = useState({
     given: '', family: '', gender: 'unknown', birth: '', email: '', phone: '',
-    relative_of: '', relationship: '', carrier: false,
+    relative_of: '', relationship: '', ancestry: '', carrier: false, variant_query: '',
   });
   const set = (k: string, v: string | boolean) => setF((s) => ({ ...s, [k]: v }));
   const [busy, setBusy] = useState(false);
@@ -45,14 +47,21 @@ export default function AddPatientView({ cohort, onAdded }: { cohort: CohortRow[
     if (!f.given || !f.family) { setErr('First and last name are required.'); return; }
     setBusy(true); setErr(null); setDone(null);
     try {
+      const q = f.variant_query.trim();
       const r = await addPatient({
         given: f.given, family: f.family, gender: f.gender, birth: f.birth || undefined,
         email: f.email || undefined, phone: f.phone || undefined,
         relative_of: f.relative_of || undefined, relationship: f.relationship || undefined,
-        ...(f.carrier ? { gid: HERO.gid, gene: HERO.gene, hgvs_c: HERO.hgvs_c } : {}),
+        ancestry: f.ancestry || undefined,
+        ...(q ? { variant_query: q }
+             : f.carrier ? { gid: HERO.gid, gene: HERO.gene, hgvs_c: HERO.hgvs_c } : {}),
       });
-      setDone(`${f.given} ${f.family} added to the registry (${r.patient_id}).`);
-      setF({ given: '', family: '', gender: 'unknown', birth: '', email: '', phone: '', relative_of: '', relationship: '', carrier: false });
+      const rv = r.resolved;
+      const variantMsg = rv
+        ? ` Resolved live: ${rv.gene ?? '?'} ${rv.hgvs_c ?? ''}${rv.hgvs_p ? ` (${rv.hgvs_p})` : ''}${rv.consequence ? ` · ${rv.consequence.replace(/_/g, ' ')}` : ''}.`
+        : '';
+      setDone(`${f.given} ${f.family} added to the registry (${r.patient_id}).${variantMsg}`);
+      setF({ given: '', family: '', gender: 'unknown', birth: '', email: '', phone: '', relative_of: '', relationship: '', ancestry: '', carrier: false, variant_query: '' });
       onAdded();
     } catch (e: unknown) {
       setErr(String((e as Error).message || e));
@@ -110,15 +119,35 @@ export default function AddPatientView({ cohort, onAdded }: { cohort: CohortRow[
             </select>
           </Field>
           <Field label="Relationship"><input className="uv-field" value={f.relationship} onChange={(e) => set('relationship', e.target.value)} placeholder="e.g. daughter, brother" /></Field>
+          <Field label="Ancestry" hintText="reported ancestry; under-represented groups down-weight the predictor">
+            <select className="uv-field" value={f.ancestry} onChange={(e) => set('ancestry', e.target.value)}>
+              {ANCESTRIES.map((a) => <option key={a} value={a}>{a || '— not recorded —'}</option>)}
+            </select>
+          </Field>
         </div>
       </Section>
 
       <Section n="4" title="Variant">
-        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '.6rem', cursor: 'pointer', padding: '.6rem .7rem', border: `1px solid ${f.carrier ? 'var(--thread)' : 'var(--line)'}`, borderRadius: 9, background: f.carrier ? 'var(--primary-soft)' : 'var(--paper)' }}>
-          <input type="checkbox" checked={f.carrier} onChange={(e) => set('carrier', e.target.checked)} style={{ accentColor: 'var(--thread)', marginTop: '.15rem' }} />
+        <Field label="Any variant, any gene" hintText="rsID, gene:c.HGVS (e.g. BRCA1:c.5096G>A), or chrom-pos-ref-alt (e.g. 17-43063930-G-A). Resolved live against the public commons.">
+          <div style={{ position: 'relative' }}>
+            <Search size={14} color="var(--faint)" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }} />
+            <input className="uv-field" style={{ paddingLeft: '2rem', fontFamily: 'var(--mono)' }}
+              value={f.variant_query}
+              onChange={(e) => { set('variant_query', e.target.value); if (e.target.value) set('carrier', false); }}
+              placeholder="BRCA1:c.5096G>A" />
+          </div>
+        </Field>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', margin: '.7rem 0' }}>
+          <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
+          <span style={{ fontSize: '.68rem', color: 'var(--faint)' }}>or</span>
+          <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
+        </div>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '.6rem', cursor: 'pointer', padding: '.6rem .7rem', border: `1px solid ${f.carrier ? 'var(--thread)' : 'var(--line)'}`, borderRadius: 9, background: f.carrier ? 'var(--primary-soft)' : 'var(--paper)', opacity: f.variant_query ? 0.5 : 1 }}>
+          <input type="checkbox" checked={f.carrier} disabled={!!f.variant_query}
+            onChange={(e) => set('carrier', e.target.checked)} style={{ accentColor: 'var(--thread)', marginTop: '.15rem' }} />
           <span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '.35rem', fontSize: '.86rem', fontWeight: 600 }}>
-              <Dna size={13} color="var(--thread)" /> Tested positive for the family variant
+              <Dna size={13} color="var(--thread)" /> Carries the seeded family variant
             </span>
             <span style={mono({ fontSize: '.72rem', color: 'var(--muted)' })}>{HERO.gene} {HERO.hgvs_c} ({HERO.hgvs_p})</span>
           </span>

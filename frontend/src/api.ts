@@ -80,6 +80,7 @@ export interface CohortRow {
   am_class: string | null;
   ancestry: string | null;
   ancestry_downweighted: boolean;
+  source?: string; // "warehouse" (Fivetran/BigQuery) or "live" (public commons)
   cited: string[];
   breakdown: PosteriorBreakdown;
 }
@@ -125,6 +126,8 @@ export interface Structural {
   uniprot: string;
   residue: number;
   summary: string;
+  am_available?: boolean;
+  structure_available?: boolean;
   structure_url: string;
   structure_page: string;
   structure_source: string;
@@ -351,7 +354,13 @@ export interface Graph { nodes: GraphNode[]; edges: GraphEdge[]; }
 export interface NewPatientPayload {
   given: string; family: string; gender?: string; birth?: string;
   email?: string; phone?: string; relative_of?: string; relationship?: string;
-  gene?: string; hgvs_c?: string; gid?: string; recorded_class?: string;
+  gene?: string; hgvs_c?: string; hgvs_p?: string; gid?: string;
+  variant_query?: string; ancestry?: string; recorded_class?: string;
+}
+
+export interface ResolvedVariant {
+  gid: string; gene: string | null; hgvs_c: string | null;
+  hgvs_p: string | null; consequence: string | null;
 }
 
 export async function getPedigree(patientId: string): Promise<Pedigree> {
@@ -366,7 +375,7 @@ export async function getGraph(patientId: string): Promise<Graph> {
   return res.json();
 }
 
-export async function addPatient(payload: NewPatientPayload): Promise<{ patient_id: string; ok: boolean }> {
+export async function addPatient(payload: NewPatientPayload): Promise<{ patient_id: string; ok: boolean; resolved?: ResolvedVariant | null }> {
   const res = await fetch(`${BASE}/patient`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   });

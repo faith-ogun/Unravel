@@ -157,6 +157,10 @@ class EvidenceContext:
     am_class: str | None = None
     ancestry_underrepresented: bool = False
     found: bool = True
+    source: str = "warehouse"   # "warehouse" (Fivetran/BigQuery) or "live" (public APIs)
+    consequence: str | None = None
+    sift_prediction: str | None = None
+    polyphen_prediction: str | None = None
 
 
 def _fetch_row(key: VariantKey, client) -> dict | None:
@@ -196,14 +200,23 @@ def build_evidence_ledger(
     family-sourced `extra` evidence (segregation, functional). Returns the
     ledger plus the ClinVar anchor context.
     """
+    source = "warehouse"
     if row is None:
         if client is None:
             from google.cloud import bigquery
             client = bigquery.Client(project=PROJECT)
         row = _fetch_row(key, client)
 
+    # Warehouse miss: the variant is in a gene we have not onboarded to Fivetran
+    # yet. Resolve it live from the public commons (VEP + gnomAD + ClinVar) so the
+    # agents can still reason. The architecture, not the staged data, is the product.
     if row is None:
-        return EvidenceContext(ledger=Ledger(variant=key.label()), found=False)
+        from .live_evidence import fetch_live_row
+        row = fetch_live_row(key)
+        source = "live"
+
+    if row is None:
+        return EvidenceContext(ledger=Ledger(variant=key.label()), found=False, source=source)
 
     gene = row.get("gene_symbol")
     ledger = Ledger(variant=key.label(gene))
@@ -222,4 +235,8 @@ def build_evidence_ledger(
         am_pathogenicity=row.get("am_pathogenicity"),
         am_class=row.get("am_class"),
         ancestry_underrepresented=ancestry_underrepresented,
+        source=source,
+        consequence=row.get("consequence"),
+        sift_prediction=row.get("sift_prediction"),
+        polyphen_prediction=row.get("polyphen_prediction"),
     )

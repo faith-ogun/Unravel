@@ -38,10 +38,10 @@ function Row({ code, label, delta, cumPoints, posterior, detail }: {
           {code}{delta !== 0 ? ` ${sign}${delta}` : ''}
         </span>
       </div>
-      <div>
+      <div style={{ minWidth: 0 }}>
         <Bar p={posterior} delta={delta} />
         {(label || detail) && (
-          <div style={{ ...mono, fontSize: '.62rem', color: 'var(--faint)', marginTop: '.18rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div style={{ ...mono, fontSize: '.62rem', color: 'var(--faint)', marginTop: '.18rem', overflowWrap: 'anywhere', lineHeight: 1.35 }}>
             {label || detail}
           </div>
         )}
