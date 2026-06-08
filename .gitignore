@@ -50,6 +50,10 @@ frontend/.firebase/
 # Local GIF reference examples (working assets, not for public repo)
 frontend/gif examples/
 
+# Private reference material (webinar screenshots, architecture refs), kept local
+frontend/Power Your AI Agent with Data - Fivetran and Google Cloud Hackathon Q&A/
+agent-architecture-refs/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

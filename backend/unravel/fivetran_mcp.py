@@ -77,26 +77,41 @@ def _uvx() -> str:
     return "uvx"  # last resort; will error clearly if truly absent
 
 
+def _mcp_command() -> tuple[str, list[str]]:
+    """Prefer the installed `fivetran-mcp` console script (baked into the Cloud Run
+    image via requirements), so the live app spawns the real MCP server without
+    needing git/uvx at runtime. Fall back to uvx-from-git where only uvx exists."""
+    found = shutil.which("fivetran-mcp")
+    if not found:
+        candidate = Path(sys.executable).parent / "fivetran-mcp"
+        if candidate.exists():
+            found = str(candidate)
+    if found:
+        return found, []
+    return _uvx(), ["--from", "git+https://github.com/fivetran/fivetran-mcp", "fivetran-mcp"]
+
+
 @asynccontextmanager
 async def mcp_session(*, allow_writes: bool = False):
     """Spawn the Fivetran MCP server and yield an initialized ClientSession."""
-    uvx = _uvx()
     path = os.environ.get("PATH", "")
     venv_bin = str(Path(sys.executable).parent)
     if venv_bin not in path:
         path = f"{venv_bin}:{path}"
     env = {
+        **os.environ,
         "FIVETRAN_API_KEY": _secret("fivetran-api-key"),
         "FIVETRAN_API_SECRET": _secret("fivetran-api-secret"),
         "PATH": path,
     }
+    # The Fivetran MCP server's top-level module is `server`, which collides with
+    # our own server.py on PYTHONPATH (=/app). Drop PYTHONPATH for the subprocess
+    # so its `from server import main` resolves to the installed MCP package.
+    env.pop("PYTHONPATH", None)
     if allow_writes:
         env["FIVETRAN_ALLOW_WRITES"] = "true"
-    server = StdioServerParameters(
-        command=uvx,
-        args=["--from", "git+https://github.com/fivetran/fivetran-mcp", "fivetran-mcp"],
-        env=env,
-    )
+    command, args = _mcp_command()
+    server = StdioServerParameters(command=command, args=args, env=env)
     async with stdio_client(server) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -138,6 +153,8 @@ class FeedFreshness:
     sync_state: str | None
     succeeded_at: str | None
     hours_old: float | None
+    paused: bool | None = None
+    setup_state: str | None = None
 
     @property
     def is_stale(self) -> bool:
@@ -176,13 +193,16 @@ async def check_freshness_async() -> list[FeedFreshness]:
             det = await mcp.call("get_connection_details", connection_id=c["id"])
             data = (det or {}).get("data", det) if isinstance(det, dict) else {}
             succeeded = data.get("succeeded_at")
+            status = data.get("status") or {}
             feeds.append(FeedFreshness(
                 schema=str(c.get("schema", "")).split(".")[0],
                 connection_id=c["id"],
                 service=c.get("service", ""),
-                sync_state=(data.get("status") or {}).get("sync_state"),
+                sync_state=status.get("sync_state"),
                 succeeded_at=succeeded,
                 hours_old=_hours_since(succeeded),
+                paused=data.get("paused"),
+                setup_state=status.get("setup_state"),
             ))
         return feeds
 
@@ -226,10 +246,12 @@ def check_freshness_rest() -> list[FeedFreshness]:
             feeds.append(FeedFreshness(schema, cid, "", None, None, None))
             continue
         succeeded = data.get("succeeded_at")
+        status = data.get("status") or {}
         feeds.append(FeedFreshness(
             schema=schema, connection_id=cid, service=data.get("service", ""),
-            sync_state=(data.get("status") or {}).get("sync_state"),
+            sync_state=status.get("sync_state"),
             succeeded_at=succeeded, hours_old=_hours_since(succeeded),
+            paused=data.get("paused"), setup_state=status.get("setup_state"),
         ))
     return feeds
 
@@ -239,11 +261,33 @@ def trigger_resync_rest(connection_id: str) -> dict:
     return _rest_request("POST", f"/connectors/{connection_id}/sync", {"force": True})
 
 
+async def set_paused_async(connection_id: str, paused: bool) -> dict:
+    """Pause or resume a connector via the MCP (writes enabled)."""
+    async with mcp_session(allow_writes=True) as mcp:
+        res = await mcp.call(
+            "modify_connection",
+            connection_id=connection_id,
+            request_body=json.dumps({"paused": paused}),
+        )
+        return res if isinstance(res, dict) else {"code": "Error", "message": str(res)}
+
+
+def set_paused_rest(connection_id: str, paused: bool) -> dict:
+    """Pause or resume a connector via the Fivetran REST API."""
+    return _rest_request("PATCH", f"/connectors/{connection_id}", {"paused": paused})
+
+
+def set_paused(connection_id: str, paused: bool) -> dict:
+    try:
+        return asyncio.run(set_paused_async(connection_id, paused))
+    except Exception:
+        return set_paused_rest(connection_id, paused)
+
+
 def check_freshness() -> list[FeedFreshness]:
-    # On Cloud Run the MCP server cannot spawn (no git for uvx); go straight to
-    # REST. Elsewhere, use the deep MCP path and fall back to REST on any error.
-    if _on_cloud_run():
-        return check_freshness_rest()
+    # Always drive the real Fivetran MCP server first (the hard requirement); the
+    # console script is baked into the image so it spawns in Cloud Run too. Fall
+    # back to the REST API only if the MCP subprocess cannot start.
     try:
         return asyncio.run(check_freshness_async())
     except Exception:
@@ -251,8 +295,6 @@ def check_freshness() -> list[FeedFreshness]:
 
 
 def trigger_resync(connection_id: str) -> dict:
-    if _on_cloud_run():
-        return trigger_resync_rest(connection_id)
     try:
         return asyncio.run(trigger_resync_async(connection_id))
     except Exception:

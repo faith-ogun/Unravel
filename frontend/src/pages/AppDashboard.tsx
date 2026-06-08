@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Database, Dna, Cpu, Box, Sparkles, Eye, Scale, GitBranch, Users, ShieldCheck,
-  List, Network, UserPlus,
+  List, Network, UserPlus, Server, ScrollText, RefreshCw,
 } from 'lucide-react';
 import {
-  getCohort, getFreshness, resync, runLoopStream, getStructural,
+  getCohort, getFreshness, resync, pauseConnector, runLoopStream, getStructural,
   type CohortRow, type Feed, type Adjudication, type ResolutionPlan,
   type CascadeResult, type StewardResult, type Structural, type LoopStreamEvent,
 } from '../api';
@@ -14,13 +14,17 @@ import AddPatientView from '../dash/AddPatientView';
 import StructureViewer from '../dash/StructureViewer';
 import PosteriorBreakdown from '../dash/PosteriorBreakdown';
 
-type View = 'watchlist' | 'pedigree' | 'graph' | 'add';
+type View = 'watchlist' | 'pedigree' | 'graph' | 'explorer' | 'audit' | 'add';
 const NAV: { id: View; label: string; icon: typeof List }[] = [
   { id: 'watchlist', label: 'Watchlist', icon: List },
   { id: 'pedigree', label: 'Pedigree', icon: Users },
-  { id: 'graph', label: 'Graph', icon: Network },
+  { id: 'graph', label: 'Knowledge graph', icon: Network },
+  { id: 'explorer', label: 'Data explorer', icon: Server },
+  { id: 'audit', label: 'Audit trail', icon: ScrollText },
   { id: 'add', label: 'Add patient', icon: UserPlus },
 ];
+
+interface AuditEvent { ts: number; cat: 'fivetran' | 'agent' | 'system'; text: string; tone?: 'ok' | 'warn' | 'info'; }
 
 type NodeState = 'idle' | 'running' | 'done' | 'held';
 interface LogLine { agent: string; text: string; tone: 'ok' | 'warn' | 'info'; }
@@ -71,6 +75,7 @@ export default function AppDashboard() {
   const [err, setErr] = useState<string | null>(null);
   const [feeds, setFeeds] = useState<Feed[] | null>(null);
   const [resyncing, setResyncing] = useState<string | null>(null);
+  const [pausing, setPausing] = useState<string | null>(null);
   const [sel, setSel] = useState<CohortRow | null>(null);
 
   const [nodes, setNodes] = useState<Record<Agent, NodeState>>({
@@ -84,7 +89,10 @@ export default function AppDashboard() {
   const [casc, setCasc] = useState<CascadeResult | null>(null);
   const [stew, setStew] = useState<StewardResult | null>(null);
   const [struc, setStruc] = useState<Structural | null>(null);
+  const [events, setEvents] = useState<AuditEvent[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
+  const logEvent = (cat: AuditEvent['cat'], text: string, tone?: AuditEvent['tone']) =>
+    setEvents((e) => [{ ts: Date.now(), cat, text, tone }, ...e].slice(0, 200));
 
   useEffect(() => {
     getCohort().then(setCohort).catch((e) => setErr(String(e.message || e)));
@@ -108,14 +116,31 @@ export default function AppDashboard() {
   async function doResync(f: Feed) {
     setResyncing(f.schema);
     push('Fivetran', `triggering targeted re-sync of ${f.schema} via MCP...`, 'info');
+    logEvent('fivetran', `MCP sync_connection → ${f.schema} (${f.connection_id})`, 'info');
     try {
       await resync(f.connection_id);
       push('Fivetran', `${f.schema} re-sync queued`, 'ok');
+      logEvent('fivetran', `${f.schema} re-sync queued via Fivetran MCP`, 'ok');
       setFeeds(await getFreshness());
     } catch (e) {
       push('Fivetran', `re-sync failed: ${e}`, 'warn');
+      logEvent('fivetran', `${f.schema} re-sync failed: ${e}`, 'warn');
     } finally {
       setResyncing(null);
+    }
+  }
+
+  async function doPause(f: Feed, paused: boolean) {
+    setPausing(f.schema);
+    logEvent('fivetran', `MCP modify_connection → ${paused ? 'pause' : 'resume'} ${f.schema}`, 'info');
+    try {
+      await pauseConnector(f.connection_id, paused);
+      logEvent('fivetran', `${f.schema} ${paused ? 'paused' : 'resumed'} via Fivetran MCP`, 'ok');
+      setFeeds(await getFreshness());
+    } catch (e) {
+      logEvent('fivetran', `${f.schema} ${paused ? 'pause' : 'resume'} failed: ${e}`, 'warn');
+    } finally {
+      setPausing(null);
     }
   }
 
@@ -128,6 +153,8 @@ export default function AppDashboard() {
     // the live topology: Watcher -> Adjudicator -> fan-out (Planner ‖ Cascade ‖ Steward)
     setNodes({ Watcher: 'running', Adjudicator: 'idle', Planner: 'idle', Cascade: 'idle', Steward: 'idle' });
     push('Watcher', `${r.gene} ${r.hgvs_c}: registry "${r.recorded_class}" vs ClinVar "${r.current_class}" (${r.review_stars}★) — five Gemini agents reasoning…`, 'info');
+    logEvent('agent', `Watch loop started: ${r.patient_name} (${r.gene} ${r.hgvs_c})`, 'info');
+    logEvent('fivetran', 'MCP get_connection_details → checked evidence-feed freshness before adjudication', 'info');
 
     let verdictActionable = false;
     const fanOutStarted = { v: false };
@@ -147,6 +174,7 @@ export default function AppDashboard() {
         verdictActionable = d.action === 'draft_recontact' && !d.withheld;
         setAdj({ patient_id: r.patient_id, reclassified: true, verdict: { triage: d.triage, action: d.action, withheld: !!d.withheld, rationale: d.rationale, key_evidence: [] } } as Adjudication);
         push('Adjudicator', `verdict: ${d.triage} · ${d.action}${d.withheld ? ' · WITHHELD' : ''}`, d.withheld ? 'warn' : 'ok');
+        logEvent('agent', `${r.patient_name} · ${r.gene} ${r.hgvs_c}: ${d.triage} / ${d.action}${d.withheld ? ' (withheld)' : ''}`, d.withheld ? 'warn' : 'ok');
         setNode('Adjudicator', 'done');
         startFanOut();
         if (r.hgvs_p) getStructural(r.gene, r.hgvs_p).then(setStruc).catch(() => {});
@@ -203,7 +231,7 @@ export default function AppDashboard() {
     if (!cohort) return;
     const params = new URLSearchParams(window.location.search);
     const v = params.get('view');
-    if (v && ['watchlist', 'pedigree', 'graph', 'add'].includes(v)) setView(v as View);
+    if (v && ['watchlist', 'pedigree', 'graph', 'explorer', 'audit', 'add'].includes(v)) setView(v as View);
     const pid = params.get('patient');
     if (!pid) return;
     const row = cohort.find((r) => r.patient_id === pid);
@@ -260,13 +288,16 @@ export default function AppDashboard() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '1rem', marginTop: '1.1rem', alignItems: 'flex-start' }}>
-        <NavRail view={view} setView={setView} />
-        <div style={{ flex: 1, minWidth: 0, display: 'grid', gap: '1rem' }}>
+      <TabBar view={view} setView={setView} />
+
+      <div style={{ marginTop: '1.1rem' }}>
+        <div style={{ minWidth: 0, display: 'grid', gap: '1rem' }}>
           {err && <div style={{ ...card, ...tag('var(--path-d)', 'var(--path-bg)'), whiteSpace: 'normal' }}>Backend error: {err}. Is the API running on :8000?</div>}
 
           {view === 'pedigree' && cohort && <PedigreeView patientId={pid} cohort={cohort} />}
           {view === 'graph' && <GraphView patientId={pid} />}
+          {view === 'explorer' && <ExplorerView feeds={feeds} events={events} resyncing={resyncing} pausing={pausing} onResync={doResync} onPause={doPause} />}
+          {view === 'audit' && <AuditView cohort={cohort} events={events} />}
           {view === 'add' && cohort && <AddPatientView cohort={cohort} onAdded={refreshCohort} />}
 
           {view === 'watchlist' && (<>
@@ -484,23 +515,151 @@ export default function AppDashboard() {
   );
 }
 
-function NavRail({ view, setView }: { view: View; setView: (v: View) => void }) {
+function TabBar({ view, setView }: { view: View; setView: (v: View) => void }) {
   return (
-    <div style={{ ...card, padding: '.5rem', display: 'flex', flexDirection: 'column', gap: '.2rem', width: 150, flex: '0 0 auto', position: 'sticky', top: 12 }}>
+    <div style={{ ...card, padding: '.35rem', marginTop: '1.1rem', display: 'flex', gap: '.2rem', flexWrap: 'wrap', position: 'sticky', top: 8, zIndex: 20 }}>
       {NAV.map((n) => {
         const on = view === n.id;
         const Icon = n.icon;
         return (
           <button key={n.id} onClick={() => setView(n.id)}
             style={{
-              display: 'flex', alignItems: 'center', gap: '.5rem', padding: '.5rem .6rem', borderRadius: 8,
-              background: on ? 'var(--vus-bg)' : 'transparent', color: on ? 'var(--thread-d)' : 'var(--muted)',
-              fontWeight: on ? 700 : 600, fontSize: '.82rem', cursor: 'pointer', textAlign: 'left', width: '100%',
+              display: 'flex', alignItems: 'center', gap: '.45rem', padding: '.5rem .85rem', borderRadius: 9,
+              background: on ? 'var(--primary)' : 'transparent', color: on ? '#fff' : 'var(--muted)',
+              fontWeight: on ? 700 : 600, fontSize: '.82rem', cursor: 'pointer',
+              boxShadow: on ? '0 2px 8px rgba(36,80,164,.22)' : 'none', transition: 'background .15s, color .15s',
             }}>
             <Icon size={15} /> {n.label}
           </button>
         );
       })}
+    </div>
+  );
+}
+
+function ViewIntro({ icon: Icon, title, body }: { icon: typeof Server; title: string; body: string }) {
+  return (
+    <div style={card}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '.65rem' }}>
+        <span style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--primary-soft)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+          <Icon size={17} color="var(--primary)" />
+        </span>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>{title}</div>
+          <div style={{ fontSize: '.8rem', color: 'var(--muted)', marginTop: '.1rem' }}>{body}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExplorerView({ feeds, events, resyncing, pausing, onResync, onPause }: {
+  feeds: Feed[] | null; events: AuditEvent[]; resyncing: string | null; pausing: string | null;
+  onResync: (f: Feed) => void; onPause: (f: Feed, paused: boolean) => void;
+}) {
+  const fivetranEvents = events.filter((e) => e.cat === 'fivetran');
+  const fresh = (feeds ?? []).filter((f) => !f.is_stale && !f.paused).length;
+  return (
+    <div style={{ display: 'grid', gap: '1rem' }}>
+      <ViewIntro icon={Server} title="Data explorer · Fivetran + BigQuery"
+        body="The evidence commons, kept fresh in BigQuery by Fivetran. Check connector health and run targeted re-syncs, pauses and resumes through the Fivetran MCP server (CRUD on live connectors)." />
+
+      <div style={card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '.4rem' }}>
+          <div style={eyebrow}>Evidence connectors · BigQuery destination</div>
+          {feeds && <div style={mono({ fontSize: '.66rem', color: 'var(--faint)' })}>health check · {fresh}/{feeds.length} connectors healthy</div>}
+        </div>
+        <div style={{ display: 'grid', gap: '.5rem', marginTop: '.7rem' }}>
+          {(feeds ?? []).map((f) => {
+            const busy = resyncing === f.schema || pausing === f.schema;
+            const dotCol = f.paused ? 'var(--faint)' : f.is_stale ? 'var(--path)' : 'var(--benign)';
+            return (
+              <div key={f.schema} style={{ display: 'flex', alignItems: 'center', gap: '.7rem', padding: '.6rem .7rem', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--paper)' }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: dotCol, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+                    <span style={{ fontWeight: 700, fontSize: '.86rem' }}>{f.schema}</span>
+                    {f.paused && <span style={tag('var(--faint)', 'var(--paper-2)')}>paused</span>}
+                    {f.service && <span style={mono({ fontSize: '.6rem', color: 'var(--faint)' })}>{f.service}</span>}
+                  </div>
+                  <div style={mono({ fontSize: '.64rem', color: 'var(--faint)' })}>{f.connection_id} · {f.setup_state ?? f.sync_state ?? 'synced'} · {f.hours_old != null ? `${f.hours_old}h ago` : 'unknown'}</div>
+                </div>
+                <button onClick={() => onPause(f, !f.paused)} disabled={busy}
+                  style={{ border: '1px solid var(--line-2)', background: 'var(--surface)', borderRadius: 8, padding: '.4rem .65rem', fontSize: '.72rem', fontWeight: 600, color: 'var(--muted)', cursor: busy ? 'default' : 'pointer', flexShrink: 0 }}>
+                  {pausing === f.schema ? '…' : f.paused ? 'Resume' : 'Pause'}
+                </button>
+                <button onClick={() => onResync(f)} disabled={busy}
+                  style={{ display: 'flex', alignItems: 'center', gap: '.35rem', border: '1px solid var(--line-2)', background: 'var(--surface)', borderRadius: 8, padding: '.4rem .7rem', fontSize: '.72rem', fontWeight: 600, color: 'var(--primary)', cursor: busy ? 'default' : 'pointer', flexShrink: 0 }}>
+                  <RefreshCw size={12} style={{ animation: resyncing === f.schema ? 'uvspin 1s linear infinite' : 'none' }} /> {resyncing === f.schema ? 'syncing…' : 'Re-sync'}
+                </button>
+              </div>
+            );
+          })}
+          {!feeds && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>checking Fivetran via MCP…</div>}
+          {feeds && feeds.length === 0 && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no Fivetran feeds reachable</div>}
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={eyebrow}>Fivetran MCP action log</div>
+        <div style={{ marginTop: '.5rem', maxHeight: 280, overflowY: 'auto' }}>
+          {fivetranEvents.length === 0 && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no MCP actions yet · trigger a re-sync, or run a watch loop (it checks freshness first)</div>}
+          {fivetranEvents.map((e, i) => (
+            <div key={i} style={{ display: 'flex', gap: '.6rem', padding: '.3rem 0', borderTop: i ? '1px solid var(--line)' : 'none' }}>
+              <span style={mono({ fontSize: '.63rem', color: 'var(--faint)', flexShrink: 0 })}>{new Date(e.ts).toLocaleTimeString()}</span>
+              <span style={mono({ fontSize: '.72rem', color: e.tone === 'warn' ? 'var(--path-d)' : e.tone === 'ok' ? 'var(--benign)' : 'var(--muted)' })}>{e.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuditView({ cohort, events }: { cohort: CohortRow[] | null; events: AuditEvent[] }) {
+  const reclass = (cohort ?? []).filter((r) => r.reclassified);
+  const catChip = (cat: AuditEvent['cat']) =>
+    cat === 'fivetran' ? tag('var(--primary)', 'var(--primary-soft)')
+      : cat === 'agent' ? tag('var(--thread-d)', 'var(--vus-bg)')
+        : tag('var(--muted)', 'var(--paper-2)');
+  return (
+    <div style={{ display: 'grid', gap: '1rem' }}>
+      <ViewIntro icon={ScrollText} title="Audit trail"
+        body="Every reclassification, agent verdict, and Fivetran action is recorded for clinician review. Draft-only by design: nothing reaches a patient without human approval." />
+
+      <div style={card}>
+        <div style={eyebrow}>Reclassification ledger · {reclass.length} flagged</div>
+        <div style={{ marginTop: '.6rem', display: 'grid', gap: '.1rem' }}>
+          {reclass.map((r) => {
+            const dc = dirChip(r.direction);
+            return (
+              <div key={r.patient_id} style={{ display: 'flex', alignItems: 'center', gap: '.6rem', padding: '.45rem .1rem', borderTop: '1px solid var(--line)' }}>
+                <span style={{ ...tag(dc.fg, dc.bg), flexShrink: 0 }}>{dc.label}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, fontSize: '.84rem' }}>{r.patient_name}</span>
+                  <span style={mono({ fontSize: '.71rem', color: 'var(--muted)', marginLeft: '.5rem' })}>{r.gene} {r.hgvs_c}</span>
+                </div>
+                <span style={mono({ fontSize: '.69rem', color: 'var(--muted)' })}>{r.recorded_class} → {r.current_class}</span>
+              </div>
+            );
+          })}
+          {reclass.length === 0 && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no reclassifications flagged</div>}
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={eyebrow}>Session activity</div>
+        <div style={{ marginTop: '.5rem', maxHeight: 340, overflowY: 'auto' }}>
+          {events.length === 0 && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no actions this session yet · select a case and run the watch loop</div>}
+          {events.map((e, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '.55rem', padding: '.32rem 0', borderTop: i ? '1px solid var(--line)' : 'none' }}>
+              <span style={mono({ fontSize: '.61rem', color: 'var(--faint)', flexShrink: 0 })}>{new Date(e.ts).toLocaleTimeString()}</span>
+              <span style={{ ...catChip(e.cat), flexShrink: 0 }}>{e.cat}</span>
+              <span style={mono({ fontSize: '.72rem', color: e.tone === 'warn' ? 'var(--path-d)' : e.tone === 'ok' ? 'var(--benign)' : 'var(--muted)' })}>{e.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -518,12 +677,13 @@ function SourceChip({ label, fresh, sub, busy, onClick }: { label: string; fresh
   );
 }
 
-function Metric({ n, label, tone }: { n: string; label: string; tone?: 'path' | 'benign' }) {
-  const col = tone === 'path' ? 'var(--path-d)' : tone === 'benign' ? 'var(--benign)' : 'var(--thread-d)';
+function Metric({ n, label, tone, sub }: { n: string; label: string; tone?: 'path' | 'benign'; sub?: string }) {
+  const col = tone === 'path' ? 'var(--path-d)' : tone === 'benign' ? 'var(--benign)' : 'var(--ink)';
   return (
-    <div style={{ ...card, padding: '.7rem .9rem' }}>
-      <div style={{ fontFamily: 'var(--serif)', fontSize: '1.7rem', color: col, lineHeight: 1 }}>{n}</div>
-      <div style={{ fontSize: '.72rem', color: 'var(--muted)', marginTop: '.2rem' }}>{label}</div>
+    <div style={{ ...card, padding: '1rem 1.1rem' }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: '.6rem', fontWeight: 600, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--faint)' }}>{label}</div>
+      <div style={{ fontFamily: 'var(--serif)', fontSize: '2.1rem', color: col, lineHeight: 1, marginTop: '.5rem' }}>{n}</div>
+      {sub && <div style={{ fontSize: '.68rem', color: 'var(--muted)', marginTop: '.3rem' }}>{sub}</div>}
     </div>
   );
 }

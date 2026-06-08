@@ -19,8 +19,7 @@ export default function Navigation() {
 
   return (
     <nav style={{ position: 'sticky', top: 0, zIndex: 100 }}>
-      <div className="needle" />
-      <div style={{ background: 'rgba(245,243,238,.82)', backdropFilter: 'blur(10px)', borderBottom: '1px solid var(--line)' }}>
+      <div style={{ background: 'rgba(255,255,255,.82)', backdropFilter: 'blur(10px)', borderBottom: '1px solid var(--line)' }}>
         <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '.85rem 2rem' }}>
           <Link to="/" style={{ display: 'flex', alignItems: 'center' }} aria-label="Unravel home">
             <img src="/logo-header.png" alt="Unravel" style={{ height: '51px', width: 'auto', display: 'block' }} />

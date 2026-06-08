@@ -7,5 +7,8 @@ google-cloud-firestore>=2.16   # FHIR R4 registry
 
 # dev / test
 pytest>=8.0
-mcp>=1.0          # MCP client for the Fivetran MCP smoke test
-uv>=0.5           # provides uvx to launch github.com/fivetran/fivetran-mcp
+mcp>=1.0          # MCP client for the Fivetran MCP server
+uv>=0.5           # provides uvx (local fallback launcher)
+# The official Fivetran MCP server, baked into the image so the live Cloud Run
+# app spawns the real MCP (the hard requirement), no git/uvx needed at runtime.
+fivetran-mcp @ git+https://github.com/fivetran/fivetran-mcp

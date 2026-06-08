@@ -7,6 +7,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# git is needed at build time to pip-install the Fivetran MCP server (a git
+# dependency); the installed console script is then spawned at runtime so the
+# live app drives the real MCP without git/uvx at request time.
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

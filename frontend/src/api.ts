@@ -233,6 +233,8 @@ export interface Feed {
   succeeded_at: string | null;
   hours_old: number | null;
   is_stale: boolean;
+  paused?: boolean | null;
+  setup_state?: string | null;
 }
 
 export async function getFreshness(): Promise<Feed[]> {
@@ -243,6 +245,12 @@ export async function getFreshness(): Promise<Feed[]> {
 
 export async function resync(connectionId: string): Promise<{ code?: string; message?: string }> {
   const res = await fetch(`${BASE}/resync?connection_id=${encodeURIComponent(connectionId)}`, { method: 'POST' });
+  if (!res.ok) throw new Error(await detail(res));
+  return res.json();
+}
+
+export async function pauseConnector(connectionId: string, paused: boolean): Promise<{ ok: boolean; paused: boolean }> {
+  const res = await fetch(`${BASE}/fivetran/pause?connection_id=${encodeURIComponent(connectionId)}&paused=${paused}`, { method: 'POST' });
   if (!res.ok) throw new Error(await detail(res));
   return res.json();
 }

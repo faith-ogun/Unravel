@@ -140,7 +140,7 @@ def freshness() -> dict:
             "schema": f.schema, "connection_id": f.connection_id, "service": f.service,
             "sync_state": f.sync_state, "succeeded_at": f.succeeded_at,
             "hours_old": round(f.hours_old, 1) if f.hours_old is not None else None,
-            "is_stale": f.is_stale,
+            "is_stale": f.is_stale, "paused": f.paused, "setup_state": f.setup_state,
         } for f in feeds]}
     except Exception:
         # degrade gracefully rather than 500: the UI just shows no Fivetran feeds
@@ -153,6 +153,17 @@ def resync(connection_id: str) -> dict:
     from unravel.fivetran_mcp import trigger_resync
     try:
         return trigger_resync(connection_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
+@app.post("/api/fivetran/pause")
+def fivetran_pause(connection_id: str, paused: bool) -> dict:
+    """Pause or resume a Fivetran connector via the MCP write path (CRUD: update)."""
+    from unravel.fivetran_mcp import set_paused
+    try:
+        res = set_paused(connection_id, paused)
+        return {"ok": True, "connection_id": connection_id, "paused": paused, "result": res}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
