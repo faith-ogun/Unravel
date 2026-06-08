@@ -168,6 +168,27 @@ def fivetran_pause(connection_id: str, paused: bool) -> dict:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
 
+@app.get("/api/onboard/status")
+def onboard_status() -> dict:
+    """Per-gene live-lookup counts + onboarding recommendations."""
+    from unravel.onboarding import onboard_status as _status
+    try:
+        return _status()
+    except Exception:
+        return {"genes": [], "threshold": 3}
+
+
+@app.post("/api/onboard")
+def onboard(gene: str) -> dict:
+    """Onboard a gene: stage its evidence to GCS, have the agent create a Fivetran
+    connector via the MCP (CRUD: create), sync it, and mark the gene onboarded."""
+    from unravel.onboarding import onboard_gene
+    try:
+        return onboard_gene(gene)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
 @app.get("/api/structural")
 def structural(gene: str, hgvs_p: str | None = None, residue: int | None = None) -> dict:
     """AlphaFold + AlphaMissense structural context for a variant residue."""

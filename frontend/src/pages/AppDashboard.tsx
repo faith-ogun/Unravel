@@ -5,8 +5,10 @@ import {
 } from 'lucide-react';
 import {
   getCohort, getFreshness, resync, pauseConnector, runLoopStream, getStructural,
+  getOnboardStatus, onboardGene,
   type CohortRow, type Feed, type Adjudication, type ResolutionPlan,
   type CascadeResult, type StewardResult, type Structural, type LoopStreamEvent,
+  type OnboardStatus,
 } from '../api';
 import PedigreeView from '../dash/PedigreeView';
 import GraphView from '../dash/GraphView';
@@ -76,6 +78,8 @@ export default function AppDashboard() {
   const [feeds, setFeeds] = useState<Feed[] | null>(null);
   const [resyncing, setResyncing] = useState<string | null>(null);
   const [pausing, setPausing] = useState<string | null>(null);
+  const [onboardStatus, setOnboardStatus] = useState<OnboardStatus | null>(null);
+  const [onboarding, setOnboarding] = useState<string | null>(null);
   const [sel, setSel] = useState<CohortRow | null>(null);
 
   const [nodes, setNodes] = useState<Record<Agent, NodeState>>({
@@ -97,6 +101,7 @@ export default function AppDashboard() {
   useEffect(() => {
     getCohort().then(setCohort).catch((e) => setErr(String(e.message || e)));
     getFreshness().then(setFeeds).catch(() => setFeeds([]));
+    getOnboardStatus().then(setOnboardStatus).catch(() => {});
   }, []);
   useEffect(() => { logRef.current?.scrollTo({ top: 1e6 }); }, [log]);
 
@@ -245,7 +250,27 @@ export default function AppDashboard() {
   const escalations = flagged.filter((r) => r.direction === 'escalation');
   const maxSilent = Math.max(0, ...(cohort ?? []).map((r) => yearsSince(r.recorded_date) ?? 0));
   const pid = sel?.patient_id ?? 'diane-marchetti';
-  const refreshCohort = () => getCohort().then(setCohort).catch(() => {});
+  const refreshCohort = () => {
+    getCohort().then(setCohort).catch(() => {});
+    getOnboardStatus().then(setOnboardStatus).catch(() => {});
+  };
+
+  async function doOnboard(gene: string) {
+    // human-in-the-loop approval gate before a Fivetran write
+    if (!window.confirm(`Onboard ${gene} to the warehouse?\n\nThe agent will stage ${gene}'s evidence to GCS and create a real Fivetran connector via the MCP, then sync it into BigQuery.`)) return;
+    setOnboarding(gene);
+    logEvent('fivetran', `approved: onboard ${gene} → staging evidence + MCP create_connection`, 'info');
+    try {
+      const r = await onboardGene(gene);
+      logEvent('fivetran', `MCP create_connection → ${r.schema} (${r.connection_id}), ${r.n_variants} variants, syncing`, 'ok');
+      getOnboardStatus().then(setOnboardStatus).catch(() => {});
+      getFreshness().then(setFeeds).catch(() => {});
+    } catch (e) {
+      logEvent('fivetran', `onboard ${gene} failed: ${e}`, 'warn');
+    } finally {
+      setOnboarding(null);
+    }
+  }
 
   return (
     <main style={{ maxWidth: 1320, margin: '0 auto', padding: '1.4rem 1.6rem 4rem', overflowX: 'clip' }}>
@@ -296,7 +321,7 @@ export default function AppDashboard() {
 
           {view === 'pedigree' && cohort && <PedigreeView patientId={pid} cohort={cohort} />}
           {view === 'graph' && <GraphView patientId={pid} />}
-          {view === 'explorer' && <ExplorerView feeds={feeds} events={events} resyncing={resyncing} pausing={pausing} onResync={doResync} onPause={doPause} />}
+          {view === 'explorer' && <ExplorerView feeds={feeds} events={events} resyncing={resyncing} pausing={pausing} onResync={doResync} onPause={doPause} onboard={onboardStatus} onboarding={onboarding} onOnboard={doOnboard} />}
           {view === 'audit' && <AuditView cohort={cohort} events={events} />}
           {view === 'add' && cohort && <AddPatientView cohort={cohort} onAdded={refreshCohort} />}
 
@@ -553,9 +578,10 @@ function ViewIntro({ icon: Icon, title, body }: { icon: typeof Server; title: st
   );
 }
 
-function ExplorerView({ feeds, events, resyncing, pausing, onResync, onPause }: {
+function ExplorerView({ feeds, events, resyncing, pausing, onResync, onPause, onboard, onboarding, onOnboard }: {
   feeds: Feed[] | null; events: AuditEvent[]; resyncing: string | null; pausing: string | null;
   onResync: (f: Feed) => void; onPause: (f: Feed, paused: boolean) => void;
+  onboard: OnboardStatus | null; onboarding: string | null; onOnboard: (gene: string) => void;
 }) {
   const fivetranEvents = events.filter((e) => e.cat === 'fivetran');
   const fresh = (feeds ?? []).filter((f) => !f.is_stale && !f.paused).length;
@@ -597,6 +623,41 @@ function ExplorerView({ feeds, events, resyncing, pausing, onResync, onPause }: 
           })}
           {!feeds && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>checking Fivetran via MCP…</div>}
           {feeds && feeds.length === 0 && <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no Fivetran feeds reachable</div>}
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={eyebrow}>Gene onboarding · demand-driven</div>
+        <div style={{ fontSize: '.76rem', color: 'var(--muted)', marginTop: '.3rem' }}>
+          Genes resolved live often enough are promoted into the warehouse: the agent stages the evidence and creates a real Fivetran connector via the MCP, then syncs it into BigQuery.
+        </div>
+        <div style={{ display: 'grid', gap: '.5rem', marginTop: '.7rem' }}>
+          {(onboard?.genes ?? []).map((g) => (
+            <div key={g.gene} style={{ display: 'flex', alignItems: 'center', gap: '.7rem', padding: '.55rem .7rem', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--paper)' }}>
+              <Dna size={14} color={g.onboarded ? 'var(--benign)' : 'var(--primary)'} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 700, fontSize: '.86rem' }}>{g.gene}</span>
+                  {g.onboarded && <span style={tag('var(--benign)', 'var(--benign-bg)')}>warehouse</span>}
+                  {!g.onboarded && g.recommended && <span style={tag('var(--primary)', 'var(--primary-soft)')}>recommended</span>}
+                </div>
+                <div style={mono({ fontSize: '.64rem', color: 'var(--faint)' })}>
+                  {g.onboarded
+                    ? `onboarded · ${g.schema ?? ''} · ${g.n_variants ?? '?'} variants · ${g.connection_id ?? ''}`
+                    : `${g.count} live lookup${g.count === 1 ? '' : 's'}${g.recommended ? ` · ≥ ${onboard?.threshold} → ready to onboard` : ''}`}
+                </div>
+              </div>
+              {!g.onboarded && (
+                <button onClick={() => onOnboard(g.gene)} disabled={!!onboarding}
+                  style={{ border: 'none', background: g.recommended ? 'var(--primary)' : 'var(--surface)', color: g.recommended ? '#fff' : 'var(--primary)', borderRadius: 8, padding: '.4rem .75rem', fontSize: '.72rem', fontWeight: 700, cursor: onboarding ? 'default' : 'pointer', flexShrink: 0, boxShadow: g.recommended ? 'none' : 'inset 0 0 0 1px var(--line-2)' }}>
+                  {onboarding === g.gene ? 'onboarding…' : 'Onboard to warehouse'}
+                </button>
+              )}
+            </div>
+          ))}
+          {(!onboard || onboard.genes.length === 0) && (
+            <div style={mono({ fontSize: '.74rem', color: 'var(--faint)' })}>no live-resolved genes yet · add a patient with a non-MMR variant to see onboarding candidates</div>
+          )}
         </div>
       </div>
 

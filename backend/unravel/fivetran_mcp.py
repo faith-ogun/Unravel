@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -278,23 +279,91 @@ def set_paused_rest(connection_id: str, paused: bool) -> dict:
 
 
 def set_paused(connection_id: str, paused: bool) -> dict:
+    _invalidate_freshness()
     try:
         return asyncio.run(set_paused_async(connection_id, paused))
     except Exception:
         return set_paused_rest(connection_id, paused)
 
 
-def check_freshness() -> list[FeedFreshness]:
+# --- connector creation (gene onboarding) --------------------------------------
+
+DEST_GROUP = "humpback_added"   # the BigQuery destination group
+EVIDENCE_BUCKET = "unravel-ra-evidence-raw"
+
+
+def _create_connection_body(schema: str, prefix: str) -> dict:
+    """The verified GCS-connector create payload (mirrors the seeded connectors)."""
+    return {
+        "service": "gcs",
+        "group_id": DEST_GROUP,
+        "config": {
+            "schema": schema, "table": "evidence",
+            "auth_type": "FIVETRAN_SERVICE_ACCOUNT",
+            "bucket": EVIDENCE_BUCKET, "prefix": prefix,
+            "file_type": "csv", "delimiter": ",", "compression": "infer",
+        },
+    }
+
+
+async def create_gcs_connector_async(schema: str, prefix: str) -> dict:
+    async with mcp_session(allow_writes=True) as mcp:
+        res = await mcp.call("create_connection", request_body=json.dumps(_create_connection_body(schema, prefix)))
+        return res if isinstance(res, dict) else {"code": "Error", "message": str(res)}
+
+
+def create_gcs_connector_rest(schema: str, prefix: str) -> dict:
+    return _rest_request("POST", "/connectors", _create_connection_body(schema, prefix))
+
+
+def create_gcs_connector(schema: str, prefix: str) -> dict:
+    """Create a new GCS->BigQuery connector via the MCP (CRUD: create); REST fallback.
+    Returns the Fivetran response; the new connection id is at data.id."""
+    _invalidate_freshness()
+    try:
+        return asyncio.run(create_gcs_connector_async(schema, prefix))
+    except Exception:
+        return create_gcs_connector_rest(schema, prefix)
+
+
+def delete_connector(connection_id: str) -> dict:
+    """Delete a connector (used for cleanup/testing)."""
+    _invalidate_freshness()
+    async def _go():
+        async with mcp_session(allow_writes=True) as mcp:
+            return await mcp.call("delete_connection", connection_id=connection_id)
+    try:
+        return asyncio.run(_go())
+    except Exception:
+        return _rest_request("DELETE", f"/connectors/{connection_id}")
+
+
+# Short TTL cache so page-load freshness does not spawn the MCP subprocess (3-5s)
+# on every request. The first call drives the real MCP; writes invalidate it.
+_FRESH_CACHE: dict = {"t": 0.0, "feeds": None}
+_FRESH_TTL = 90.0
+
+
+def _invalidate_freshness() -> None:
+    _FRESH_CACHE["feeds"] = None
+
+
+def check_freshness(*, force: bool = False) -> list[FeedFreshness]:
     # Always drive the real Fivetran MCP server first (the hard requirement); the
     # console script is baked into the image so it spawns in Cloud Run too. Fall
     # back to the REST API only if the MCP subprocess cannot start.
+    if not force and _FRESH_CACHE["feeds"] is not None and (time.monotonic() - _FRESH_CACHE["t"]) < _FRESH_TTL:
+        return _FRESH_CACHE["feeds"]
     try:
-        return asyncio.run(check_freshness_async())
+        feeds = asyncio.run(check_freshness_async())
     except Exception:
-        return check_freshness_rest()
+        feeds = check_freshness_rest()
+    _FRESH_CACHE.update(t=time.monotonic(), feeds=feeds)
+    return feeds
 
 
 def trigger_resync(connection_id: str) -> dict:
+    _invalidate_freshness()
     try:
         return asyncio.run(trigger_resync_async(connection_id))
     except Exception:

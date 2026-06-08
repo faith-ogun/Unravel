@@ -255,6 +255,24 @@ export async function pauseConnector(connectionId: string, paused: boolean): Pro
   return res.json();
 }
 
+export interface OnboardGeneRow {
+  gene: string; count: number; onboarded: boolean;
+  connection_id?: string | null; schema?: string | null; n_variants?: number | null; recommended: boolean;
+}
+export interface OnboardStatus { genes: OnboardGeneRow[]; threshold: number; }
+
+export async function getOnboardStatus(): Promise<OnboardStatus> {
+  const res = await fetch(`${BASE}/onboard/status`);
+  if (!res.ok) throw new Error(await detail(res));
+  return res.json();
+}
+
+export async function onboardGene(gene: string): Promise<{ ok: boolean; gene: string; connection_id: string; schema: string; n_variants: number }> {
+  const res = await fetch(`${BASE}/onboard?gene=${encodeURIComponent(gene)}`, { method: 'POST' });
+  if (!res.ok) throw new Error(await detail(res));
+  return res.json();
+}
+
 // --- resolution planner / cascade / steward ----------------------------------
 
 export interface PlanStep {

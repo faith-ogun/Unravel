@@ -501,6 +501,9 @@ def add_patient(*, given: str, family: str, gender: str = "unknown", birth: str 
         gid, gene, hgvs_c, hgvs_p = nv.gid, nv.gene or gene, nv.hgvs_c or hgvs_c, nv.hgvs_p or hgvs_p
         resolved = {"gid": nv.gid, "gene": nv.gene, "hgvs_c": nv.hgvs_c,
                     "hgvs_p": nv.hgvs_p, "consequence": nv.consequence}
+        # count this as a live lookup of the gene (drives the onboarding signal)
+        from .onboarding import record_lookup
+        record_lookup(nv.gene)
 
     role = "carrier" if gid else None
     patient = _patient(pid, family, given, gender or "unknown", birth or "1980-01-01",
