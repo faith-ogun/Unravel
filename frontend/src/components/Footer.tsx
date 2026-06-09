@@ -16,7 +16,7 @@ export default function Footer() {
           <Link to="/app">Simulator</Link>
         </div>
         <div style={{ fontSize: '.8rem', color: 'var(--faint)' }}>
-          Gemini 3 · Google ADK · Fivetran · FHIR R4 · draft-only, human-in-the-loop
+          Gemini 3.1 · Google ADK (Agent Builder) · Fivetran MCP · FHIR R4 · draft-only, human-in-the-loop
         </div>
       </div>
     </footer>

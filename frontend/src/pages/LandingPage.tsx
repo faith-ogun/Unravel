@@ -23,9 +23,9 @@ export default function LandingPage() {
               The result said <span className="emph-b">uncertain</span>. The evidence said <span className="emph">otherwise</span>. Nobody told the family.
             </h1>
             <p className="body-lg" style={{ maxWidth: '56ch' }}>
-              Unravel is an autonomous agent that re-reads the world’s evolving variant evidence. The moment a Variant of
+              Unravel is a five-agent system that re-reads the world’s evolving variant evidence. The moment a Variant of
               Uncertain Significance is reclassified as pathogenic, it drafts the recontact for the patient and every
-              at-risk relative.
+              at-risk relative, for a clinician to review and send.
             </p>
             <div style={{ display: 'flex', gap: '.9rem', marginTop: '2.2rem', flexWrap: 'wrap' }}>
               <Link to="/app" className="btn btn-primary">Run the simulator <ArrowRight size={18} /></Link>
@@ -65,7 +65,7 @@ export default function LandingPage() {
               “The duty to recontact is, in ACMG’s own words, <span className="emph">desirable but not currently feasible.</span>”
             </blockquote>
             <ol className="stack">
-              <li><span className="k">01 · evidence</span><span className="v">The databases move. ClinVar, ClinGen, OncoKB and CIViC update continuously, but a filed report never re-reads them.</span></li>
+              <li><span className="k">01 · evidence</span><span className="v">The databases move. ClinVar, gnomAD and AlphaMissense update continuously, but a filed report never re-reads them.</span></li>
               <li><span className="k">02 · patient</span><span className="v">By the time a variant flips, the proband may be in remission or gone. The result lands in an inbox with no owner.</span></li>
               <li><span className="k">03 · family</span><span className="v">A germline variant is heritable. The life now at risk is a relative’s, and cascade testing is never offered.</span></li>
             </ol>
@@ -94,22 +94,22 @@ export default function LandingPage() {
         <div className="wrapX">
           <div className="mono-tag"><span className="dash" /> What it does · 03</div>
           <h2 className="display display-mid" style={{ margin: '1rem 0 .6rem', maxWidth: '22ch' }}>
-            Three agents. One loop. Genuinely multi-shape.
+            Five agents. One loop. Genuinely multi-agent.
           </h2>
-          <p className="body-lg" style={{ maxWidth: '46ch', marginBottom: '2.8rem' }}>
-            Each agent works on different data, on a different clock: deterministic where it must be auditable, Gemini where it must reason.
+          <p className="body-lg" style={{ maxWidth: '52ch', marginBottom: '2.8rem' }}>
+            Five Gemini 3.1 agents share one session: a Watcher detects, an Adjudicator judges and withholds, and a parallel fan-out plans, cascades and stewards. They reason; auditable tools execute.
           </p>
 
           <motion.div className="tiles-3" initial="h" whileInView="s" viewport={viewport}
             variants={{ h: {}, s: { transition: { staggerChildren: .12 } } }}>
-            <Tile kicker="Capability · 01" accent="var(--primary)" icon={<RefreshCw size={22} color="var(--primary)" />}
-              title="The Watcher" body="Continuous Fivetran sync across four evidence sources. Reads freshness, triggers re-syncs, and runs an auditable delta against the historical VUS registry."
+            <Tile kicker="Watcher · Flash-Lite" accent="var(--primary)" icon={<RefreshCw size={22} color="var(--primary)" />}
+              title="The Watcher" body="Continuous Fivetran sync across the evidence commons, driven through the real MCP server. Reads freshness, triggers re-syncs, and runs an auditable delta against the historical VUS registry."
               sketch={<SketchSync />} />
-            <Tile kicker="Capability · 02" accent="var(--conflict)" icon={<ScanSearch size={22} color="var(--conflict)" />}
-              title="The Adjudicator" body="Reasons over conflicting submissions and review status, applies ACMG logic, and withholds low-confidence flips. The part a rules engine gets wrong."
+            <Tile kicker="Adjudicator · Pro · the moat" accent="var(--conflict)" icon={<ScanSearch size={22} color="var(--conflict)" />}
+              title="The Adjudicator" body="Assembles a cited ACMG ledger, computes a calibrated posterior, and withholds low-confidence flips. Two identical scores, opposite actions, decided on review quality, the part a rules engine gets wrong."
               sketch={<SketchAdjudicate />} />
-            <Tile kicker="Capability · 03" accent="var(--path)" icon={<Users size={22} color="var(--path)" />}
-              title="Cascade Coordinator" body="Finds the patient and at-risk relatives, then drafts the recontact and cascade-testing fan-out as FHIR, clinician reviewed, never sent."
+            <Tile kicker="Planner ‖ Cascade ‖ Steward" accent="var(--path)" icon={<Users size={22} color="var(--path)" />}
+              title="The fan-out" body="Three agents in parallel: the Planner ranks the next-best experiment, the Cascade Coordinator drafts the family recontact as FHIR, and the Steward routes ethics and a ClinVar give-back. Draft-only, clinician reviewed."
               sketch={<SketchFanout />} />
           </motion.div>
         </div>
@@ -124,7 +124,7 @@ export default function LandingPage() {
             <p className="body-lg" style={{ marginTop: '1rem', maxWidth: '34ch' }}>
               at-risk relatives are <span className="emph">never even told</span> they may carry the family’s variant.
             </p>
-            <div className="mono" style={{ fontSize: '.7rem', color: 'var(--faint)', marginTop: '.9rem' }}>Systematic review &amp; meta-analysis, 2023</div>
+            <div className="mono" style={{ fontSize: '.7rem', color: 'var(--faint)', marginTop: '.9rem' }}>Ahsan et al., PEC Innovation 2023 · meta-analysis, 11,711 relatives</div>
           </motion.div>
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={viewport} transition={{ duration: .65 }}>
             <h2 className="display display-mid" style={{ marginBottom: '1.2rem' }}>
@@ -223,7 +223,7 @@ function Tile({ kicker, accent, icon, title, body, sketch }: { kicker: string; a
 function SketchSync() {
   return (
     <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
-      {['ClinVar', 'ClinGen', 'OncoKB', 'CIViC'].map(s => (
+      {['ClinVar', 'gnomAD', 'AlphaMissense', 'AlphaFold'].map(s => (
         <span key={s} className="mono" style={{ fontSize: '.66rem', padding: '.3rem .55rem', borderRadius: 6, background: 'var(--primary-soft)', color: 'var(--primary-d)', border: '1px solid #bcccea' }}>{s}</span>
       ))}
     </div>

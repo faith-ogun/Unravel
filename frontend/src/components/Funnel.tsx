@@ -27,8 +27,8 @@ function Star({ x, y, r, fill }: { x: number; y: number; r: number; fill: string
 
 function VisWatch() {
   const sources = [
-    { s: 'ClinVar', x: 52, y: 48 }, { s: 'ClinGen', x: 288, y: 48 },
-    { s: 'OncoKB', x: 52, y: 212 }, { s: 'CIViC', x: 288, y: 212 },
+    { s: 'ClinVar', x: 52, y: 48 }, { s: 'gnomAD', x: 288, y: 48 },
+    { s: 'AlphaMissense', x: 52, y: 212 }, { s: 'AlphaFold', x: 288, y: 212 },
   ];
   return (
     <svg viewBox="0 0 340 260" width="100%" style={{ maxWidth: 380 }} fill="none">
@@ -169,7 +169,7 @@ function VisDraft() {
 }
 
 const panels: Panel[] = [
-  { n: '01', tag: 'Watch', accent: C.primary, vis: <VisWatch />, title: 'The evidence never stops moving', body: 'Fivetran keeps ClinVar, ClinGen, OncoKB and CIViC in continuous sync. The Watcher reads freshness, triggers re-syncs, and runs an auditable delta against the clinic’s historical VUS registry.' },
+  { n: '01', tag: 'Watch', accent: C.primary, vis: <VisWatch />, title: 'The evidence never stops moving', body: 'Fivetran keeps ClinVar, gnomAD and AlphaMissense in continuous sync, driven through the real MCP server. The Watcher reads freshness, triggers re-syncs, and runs an auditable delta against the clinic’s historical VUS registry.' },
   { n: '02', tag: 'Detect', accent: C.conflict, vis: <VisDetect />, title: 'A variant quietly changes class', body: 'Years after the report, a Variant of Uncertain Significance is reassessed. The Watcher catches the delta the moment the feed updates, with no human having to remember to look.' },
   { n: '03', tag: 'Adjudicate', accent: C.primary, vis: <VisAdjudicate />, title: 'Is the change actually real?', body: 'The Adjudicator weighs review status, resolves conflicting submissions, applies ACMG and gene-tier logic, and withholds a low-confidence flip. The part no rules engine can do.' },
   { n: '04', tag: 'Match', accent: C.path, vis: <VisMatch />, title: 'Find everyone who carries it', body: 'On a confirmed, actionable upgrade, Unravel locates the patient and the at-risk first-degree relatives in the FHIR pedigree. A germline variant is a family event.' },
