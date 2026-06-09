@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/unravel-logo.png" alt="Unravel — Genomics · Clinical Intelligence" width="560">
+</p>
+
 # Unravel
 
 **Closing the one diagnostic loop in medicine that stays open for *years*, for the patient *and* their family.**
