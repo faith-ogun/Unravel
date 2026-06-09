@@ -176,6 +176,24 @@ def approve(patient: str, action: str = "recontact") -> dict:
     return {"ok": True, "patient": patient, "action": action}
 
 
+class AssistQuery(BaseModel):
+    question: str
+    context: str = ""
+
+
+@app.post("/api/assist")
+async def assist(q: AssistQuery) -> dict:
+    """Read-only, grounded data assistant (Gemini Flash). Answers questions about
+    Unravel's data and architecture from a static knowledge pack plus the compact,
+    already-public context snapshot the UI sends. No DB handle, no write tools; the
+    cohort is synthetic. See unravel/assistant.py for the guardrail design."""
+    from unravel.assistant import answer_async
+    try:
+        return await answer_async(q.question, q.context)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
 @app.post("/api/fivetran/pause")
 def fivetran_pause(connection_id: str, paused: bool) -> dict:
     """Pause or resume a Fivetran connector via the MCP write path (CRUD: update)."""

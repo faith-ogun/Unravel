@@ -106,6 +106,23 @@ export async function approveCase(patient: string, action = 'recontact'): Promis
   return res.json();
 }
 
+// --- data assistant (read-only, grounded explainer) --------------------------
+
+export interface AssistReply {
+  answer: string;
+  grounded: boolean;
+}
+
+export async function assist(question: string, context: string): Promise<AssistReply> {
+  const res = await fetch(`${BASE}/assist`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, context }),
+  });
+  if (!res.ok) throw new Error(await detail(res));
+  return res.json();
+}
+
 export interface Verdict {
   triage: string;
   action: string;

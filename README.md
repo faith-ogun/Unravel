@@ -8,7 +8,7 @@ Built for the **Google Cloud Rapid Agent Hackathon** | **Fivetran track**.
 
 - **Live demo (no login):** https://unravel-ra.web.app  ·  **API:** https://unravel-api-306681961993.us-central1.run.app
 - **3-minute video:** _coming soon_
-- **Powered by** Gemini 3.1 | Google ADK on Cloud Run | Fivetran MCP | BigQuery | Firestore (FHIR R4) | AlphaFold + AlphaMissense
+- **Powered by** Gemini 3.1 | Google ADK (Agent Builder) on Cloud Run | Fivetran MCP | BigQuery | Firestore (FHIR R4) | AlphaFold + AlphaMissense
 
 ---
 
@@ -104,7 +104,7 @@ Detecting a status flip is deterministic, so it is a **tool**, not an agent. The
 
 ## The dashboard
 
-A clinician-facing surveillance console (React + TypeScript + Vite), backed by the live engine:
+A clinician-facing surveillance console (React + TypeScript + Vite), backed by the live engine and organised into tabbed views, led by a headline metric: the number of variants under surveillance and how many have crossed a reclassification boundary.
 
 - **Watchlist**: the cohort ranked by urgency, each with its live calibrated posterior, reclassification direction, and "years silent." Selecting a case runs the full five-agent loop with the agent pipeline lighting up node by node and a streaming activity log.
 - **3D structural viewer**: an interactive AlphaFold protein structure (via 3Dmol.js) coloured by AlphaMissense pathogenicity, pLDDT confidence, or pathogenic neighbourhood. The variant residue is highlighted with its 3D context. Rotate, zoom, click between colour modes.
@@ -113,6 +113,9 @@ A clinician-facing surveillance console (React + TypeScript + Vite), backed by t
 - **FHIR reveal**: click any draft recontact to see the raw FHIR Bundle (Communication + RiskAssessment) the Cascade Coordinator produced. Draft-only, intent: proposal.
 - **Resolution plan**: the next-best-evidence card showing which experiment (segregation, tumour IHC/MSI, functional, splicing) would move the needle most, projected posterior, and whether it crosses the actionable threshold.
 - **Evidence sources rail**: live Fivetran freshness for each feed via the MCP, with a one-click targeted re-sync.
+- **Fivetran control plane (Explorer)**: a single pane over the live connectors, list, health-check, freshness, targeted re-sync, pause/resume, and on-demand connector **creation**, every action driven through the real MCP. A gene looked up often enough surfaces an **onboarding** card that promotes it into the warehouse behind a new connector.
+- **Approvals**: a human-in-the-loop queue. Every Fivetran write (a re-sync, a gene onboarding) waits here for an explicit clinician approval before the agent executes it.
+- **Audit trail**: a persistent, timestamped record of every clinical verdict and every Fivetran/MCP action with its actor, so the whole loop is accountable after the fact.
 - **Add patient**: write a new FHIR Patient to the registry from the UI with a professional clinical intake form.
 
 Everything shown is computed live (posteriors from BigQuery, verdicts from Gemini, structure from AlphaFold); only the patient cohort is synthetic.
@@ -150,7 +153,7 @@ We acknowledge existing work openly. Each tool owns only **one** link of the cha
 
 ## Tech stack
 
-- **Agent:** Google ADK (code-first, Python), deployed to **Cloud Run** / Agent Runtime
+- **Agent:** Google ADK / Agent Builder (code-first, Python), deployed to **Cloud Run** / Agent Runtime
 - **Models:** Gemini 3.1 Flash-Lite + Gemini 3.1 Pro (Vertex AI)
 - **Partner MCP:** Fivetran + Fivetran MCP server
 - **Data:** BigQuery (unified evidence view) | FHIR R4 patient/VUS registry in **Firestore** | AlphaFold DB (structures)
@@ -168,7 +171,7 @@ Every requirement, mapped to where it lives.
 |---|---|
 | **Fivetran destination** (BigQuery / Cloud Storage / Cloud SQL) | Three Fivetran **GCS → BigQuery** connectors land ClinVar, gnomAD and AlphaMissense; a curated view (`backend/sql/variant_evidence.sql`) models them into the AI data plane the agents query. |
 | **Fivetran MCP server** (hard requirement) | The official `fivetran-mcp` server is baked into the Cloud Run image and driven live by the app: freshness checks (`get_connection_details`) before each adjudication, targeted re-syncs (`sync_connection`), pause/resume (`modify_connection`), and on-demand connector **creation** (`create_connection`) for gene onboarding. `backend/unravel/fivetran_mcp.py`, `onboarding.py`. |
-| **Google Cloud AI tooling** | Gemini 3.1 Pro + Flash-Lite (Vertex AI), orchestrated as a five-agent **Google ADK** system (Sequential root + Parallel fan-out). `backend/unravel/agents.py`. |
+| **Google Cloud AI tooling** | Gemini 3.1 Pro + Flash-Lite (Vertex AI), orchestrated as a five-agent **Google ADK (Agent Builder)** system (Sequential root + Parallel fan-out). `backend/unravel/agents.py`. |
 | **End-to-end** | Fivetran MCP → BigQuery data plane → five ADK agents (freshness-checked) → draft FHIR clinical action, all visible on the live dashboard. |
 | **Freshness-aware reasoning** | The loop checks each feed's freshness via the MCP before the Adjudicator rules; stale feeds can be re-synced. Agents are only as good as the data they access. |
 | **Human-in-the-loop** | Every clinical output is a **draft** FHIR resource a clinician approves; every Fivetran write (onboarding) is gated behind an explicit in-app approval. |
@@ -233,7 +236,7 @@ Validated for scale against a **600-patient synthetic FHIR cohort carrying varia
 
 - **Detection specificity:** change-detection is deterministic, so the test that matters is whether it false-alarms. Across **48 hard negatives** where the ClinVar *text* changes but the *category* does not (e.g. "Likely pathogenic" → "Pathogenic"), the Watcher raises **zero** false reclassifications, ignoring cosmetic churn and firing only on real category crossings.
 - **Safety floor:** withhold-recall **1.0** on the 1-star traps, and **zero dangerous escalations** (nothing that should be withheld or reassured is pushed toward recontact).
-- **pytest suite: 79 test functions, 896 cases** (the backtest parametrises detection and action over all 600 cohort patients), covering the calibration anchors, the 1-star withhold, the next-best-evidence tip-over, and the five agents.
+- **pytest suite: 74 test functions, 891 cases, all green** (the backtest parametrises detection and action over all 600 cohort patients), covering the calibration anchors, the 1-star withhold, the next-best-evidence tip-over, and the five agents.
 
 > Every result here is one we can stand behind. The headline evidence, the live Adjudicator's judgement and the calibration on 31,432 real variants, is independent and non-trivial; the deterministic steps are validated as correctness checks. The cohort is synthetic patients carrying real variants: a research prototype, rigorously evaluated, not yet clinically validated.
 
@@ -268,17 +271,24 @@ Deploy: containerise `backend/` to Cloud Run; `npm run build` to Firebase Hostin
 
 ```
 backend/
-  unravel/    the engine: acmg (Bayesian posterior), evidence (ledger), detection,
-              registry (FHIR + Firestore), adjudicator (Gemini), planner, cascade,
-              steward, structure (AlphaFold), fivetran_mcp, watch (orchestration)
-  scripts/    data extractors (gnomAD, AlphaMissense), registry seeder, MCP smoke test
+  unravel/    the engine: acmg (Bayesian posterior), evidence (ledger) + live_evidence
+              (disease-agnostic public-API fallback), detection, registry (FHIR + Firestore),
+              adjudicator (Gemini), planner, cascade, steward, structure (AlphaFold),
+              fivetran_mcp, onboarding (gene promotion), audit (persistent log),
+              assistant (read-only grounded explainer, Flash), watch (orchestration)
+  connectors/ a custom Fivetran Connector SDK connector (gnomAD), deployed live
+  scripts/    data extractors (gnomAD, AlphaMissense), registry seeder,
+              Fivetran setup + MCP smoke test
   sql/        the unified BigQuery evidence view
-  tests/      pytest suite (61)
-  server.py   FastAPI: /api/cohort, /adjudicate, /plan, /cascade, /steward,
-              /structural, /pedigree, /graph, /patient, /freshness, /resync
+  tests/      pytest suite (74 functions, 891 cases, all green)
+  server.py   FastAPI: /api/cohort, /run-loop (+stream), /pedigree, /graph, /patient,
+              /structural, /freshness, /resync, /fivetran/pause, /warehouse,
+              /onboard (+status), /audit, /approve, /assist
 frontend/
-  src/pages/  landing page, technology page, mission page, app dashboard
-  src/dash/   graph view, pedigree view, structure viewer, add-patient form
+  src/pages/  landing, technology, mission, app dashboard (Watchlist, Explorer,
+              Approvals, Audit views)
+  src/dash/   graph view, pedigree view, structure viewer, add-patient form,
+              assistant widget (ask the data), guided tour
   src/api.ts  typed API client
 ```
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Database, Dna, Cpu, Box, Sparkles, Eye, Scale, GitBranch, Users, ShieldCheck,
-  List, Network, UserPlus, Server, ScrollText, RefreshCw, ClipboardCheck,
+  List, Network, UserPlus, Server, ScrollText, RefreshCw, ClipboardCheck, Compass,
 } from 'lucide-react';
 import {
   getCohort, getFreshness, resync, pauseConnector, runLoopStream, getStructural,
@@ -15,6 +15,8 @@ import GraphView from '../dash/GraphView';
 import AddPatientView from '../dash/AddPatientView';
 import StructureViewer from '../dash/StructureViewer';
 import PosteriorBreakdown from '../dash/PosteriorBreakdown';
+import AssistantWidget from '../dash/AssistantWidget';
+import Tour, { type TourStep } from '../dash/Tour';
 
 type View = 'watchlist' | 'pedigree' | 'graph' | 'explorer' | 'approvals' | 'audit' | 'add';
 const NAV: { id: View; label: string; icon: typeof List }[] = [
@@ -92,6 +94,7 @@ export default function AppDashboard() {
   });
   const [running, setRunning] = useState(false);
   const [view, setView] = useState<View>('watchlist');
+  const [tourOpen, setTourOpen] = useState(false);
   const [log, setLog] = useState<LogLine[]>([]);
   const [adj, setAdj] = useState<Adjudication | null>(null);
   const [plan, setPlan] = useState<ResolutionPlan | null>(null);
@@ -294,6 +297,31 @@ export default function AppDashboard() {
     } catch { /* keep optimistic UI */ }
   }
 
+  // the tour selects a real case so the workup/structure views are populated
+  // without needing the (slow) full loop to run.
+  const ensureCase = () => {
+    if (!cohort) return;
+    if (sel?.patient_id === 'diane-marchetti') return;
+    const d = cohort.find((r) => r.patient_id === 'diane-marchetti') ?? cohort[0];
+    if (d) selectPatient(d);
+  };
+
+  const tourSteps: TourStep[] = [
+    { title: 'Welcome to Unravel', body: 'A quick tour of how Unravel watches for genetic variants that change meaning over time, and closes the loop back to the patient. Use Next, or skip anytime.' },
+    { selector: '[data-tour="tabs"]', title: 'Seven views', body: 'Everything lives behind these tabs. The tour will move through them for you, but you can explore freely afterwards.', onEnter: () => setView('watchlist') },
+    { selector: '[data-tour="metrics"]', title: 'The scale', body: 'Tens of thousands of variants kept under surveillance, and how many have already reclassified in this clinic’s cohort.', onEnter: () => { setView('watchlist'); ensureCase(); } },
+    { selector: '[data-tour="watchlist"]', title: 'The watchlist', body: 'Each row is a patient with a past variant of uncertain significance (VUS), ranked by urgency and by how many years it has gone unreviewed.', onEnter: () => setView('watchlist') },
+    { selector: '[data-tour="posterior"]', title: 'A calibrated probability', body: 'This is the published point-based Bayesian ACMG probability of pathogenicity, not an invented score. About 0.90 is the line where a variant becomes actionable.', onEnter: () => { setView('watchlist'); ensureCase(); } },
+    { selector: '[data-tour="pipeline"]', title: 'Five Gemini agents', body: 'The Watcher detects the change, the Adjudicator judges it and withholds on weak evidence, then the Planner, Cascade and Steward agents fan out in parallel.', onEnter: () => { setView('watchlist'); ensureCase(); } },
+    { selector: '[data-tour="structure"]', title: 'The structural story', body: 'The real AlphaFold 3D model, coloured by AlphaMissense. Red residues are predicted more damaging. It is supporting evidence, never the verdict on its own.', onEnter: () => { setView('watchlist'); ensureCase(); } },
+    { selector: '[data-tour="connectors"]', title: 'Fivetran keeps it fresh', body: 'The public evidence commons, synced into BigQuery. Check connector health and run re-syncs, pauses and resumes, all through the real Fivetran MCP server.', onEnter: () => setView('explorer') },
+    { selector: '[data-tour="onboarding"]', title: 'Onboard a gene on demand', body: 'A gene looked up often enough is promoted into the warehouse: the agent creates a real Fivetran connector via the MCP, behind a human approval.', onEnter: () => setView('explorer') },
+    { selector: '[data-tour="graph"]', title: 'The evidence network', body: 'Every node around one variant: ClinVar, gnomAD, AlphaMissense, AlphaFold, the calibrated posterior, and the family. Click any node to see why it matters.', onEnter: () => setView('graph') },
+    { selector: '[data-tour="approvals"]', title: 'Human-in-the-loop', body: 'Nothing reaches a patient automatically. A clinician approves every family recontact here before anything is sent.', onEnter: () => setView('approvals') },
+    { selector: '[data-tour="audit"]', title: 'A full audit trail', body: 'Every verdict, every Fivetran action and every approval is recorded and persisted, so the whole loop stays accountable after the fact.', onEnter: () => setView('audit') },
+    { selector: '[data-tour="assistant"]', title: 'Ask the data', body: 'Anytime, open this assistant to ask how the data flows, what a number means, or how to add a patient. It explains what is on your screen, and never diagnoses.', onEnter: () => setView('watchlist') },
+  ];
+
   return (
     <main style={{ maxWidth: 1320, margin: '0 auto', padding: '1.4rem 1.6rem 4rem', overflowX: 'clip' }}>
       <style>{`
@@ -316,6 +344,12 @@ export default function AppDashboard() {
           <div style={{ fontSize: '.82rem', color: 'var(--muted)' }}>
             Any gene, any variant: onboarded genes are served from the Fivetran warehouse, anything else live from the public commons. Verdicts from Gemini 3.1 Pro, structure from AlphaFold. Synthetic cohort.
           </div>
+          <button onClick={() => setTourOpen(true)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', marginTop: '.6rem',
+              border: '1px solid var(--primary)', background: 'var(--primary-soft)', color: 'var(--primary)',
+              borderRadius: 999, padding: '.4rem .85rem', fontSize: '.8rem', fontWeight: 700, cursor: 'pointer' }}>
+            <Compass size={14} /> Take a tour
+          </button>
         </div>
         <div style={{ ...card, padding: '.7rem .8rem', minWidth: 330 }}>
           <div style={{ ...eyebrow, marginBottom: '.45rem' }}>Evidence sources</div>
@@ -342,15 +376,15 @@ export default function AppDashboard() {
           {err && <div style={{ ...card, ...tag('var(--path-d)', 'var(--path-bg)'), whiteSpace: 'normal' }}>Backend error: {err}. Is the API running on :8000?</div>}
 
           {view === 'pedigree' && cohort && <PedigreeView patientId={pid} cohort={cohort} />}
-          {view === 'graph' && <GraphView patientId={pid} cohort={cohort} onPick={selectPatient} />}
+          {view === 'graph' && <div data-tour="graph"><GraphView patientId={pid} cohort={cohort} onPick={selectPatient} /></div>}
           {view === 'explorer' && <ExplorerView feeds={feeds} events={events} resyncing={resyncing} pausing={pausing} onResync={doResync} onPause={doPause} onboard={onboardStatus} onboarding={onboarding} onOnboard={requestOnboard} warehouse={warehouse} />}
-          {view === 'audit' && <AuditView cohort={cohort} events={events} persisted={auditLog} />}
-          {view === 'approvals' && <ApprovalsView cohort={cohort} approved={approved} onReview={(r) => { selectPatient(r); setView('watchlist'); }} onApprove={doApprove} />}
+          {view === 'audit' && <div data-tour="audit"><AuditView cohort={cohort} events={events} persisted={auditLog} /></div>}
+          {view === 'approvals' && <div data-tour="approvals"><ApprovalsView cohort={cohort} approved={approved} onReview={(r) => { selectPatient(r); setView('watchlist'); }} onApprove={doApprove} /></div>}
           {view === 'add' && cohort && <AddPatientView cohort={cohort} onAdded={refreshCohort} />}
 
           {view === 'watchlist' && (<>
           {/* impact strip */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '.8rem' }}>
+          <div data-tour="metrics" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '.8rem' }}>
             <Metric n={warehouse?.variant_count ? warehouse.variant_count.toLocaleString() : '…'} label="variants under surveillance" />
             <Metric n={cohort ? `${flagged.length}` : '…'} label="reclassified in cohort" />
             <Metric n={`${escalations.length}`} label="escalations to act on" tone="path" />
@@ -360,7 +394,7 @@ export default function AppDashboard() {
 
           <div className="uv-workgrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,340px) minmax(0,1fr)', gap: '1.1rem', alignItems: 'start' }}>
         {/* worklist */}
-        <div style={{ ...card, padding: '.9rem', minWidth: 0 }}>
+        <div data-tour="watchlist" style={{ ...card, padding: '.9rem', minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <div style={eyebrow}>Watchlist · ranked by urgency</div>
             <span style={{ ...mono({ fontSize: '.66rem' }), color: 'var(--faint)' }}>{cohort?.length ?? 0} cases</span>
@@ -437,7 +471,7 @@ export default function AppDashboard() {
                   </button>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '.25rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+                <div data-tour="pipeline" style={{ display: 'flex', alignItems: 'center', gap: '.25rem', marginTop: '1rem', flexWrap: 'wrap' }}>
                   {AGENTS.map((a, i) => (
                     <div key={a} style={{ display: 'flex', alignItems: 'center' }}>
                       <PipelineNode name={a} state={nodes[a]} />
@@ -448,7 +482,7 @@ export default function AppDashboard() {
               </div>
 
               {/* posterior + ledger */}
-              <div style={card}>
+              <div data-tour="posterior" style={card}>
                 <div style={eyebrow}>Calibrated posterior · point-based ACMG</div>
                 <div style={{ display: 'flex', gap: '1.4rem', alignItems: 'center', marginTop: '.6rem', flexWrap: 'wrap' }}>
                   <BigGauge p={sel.posterior} />
@@ -521,6 +555,7 @@ export default function AppDashboard() {
               )}
 
               {struc && (
+                <div data-tour="structure">
                 <OutCard title="Structural story · AlphaFold + AlphaMissense" edge="var(--thread-d)">
                   <p style={{ fontSize: '.86rem', marginBottom: '.5rem' }}>{struc.summary}</p>
                   {struc.structure_available === false ? (
@@ -547,6 +582,7 @@ export default function AppDashboard() {
                     </>
                   )}
                 </OutCard>
+                </div>
               )}
 
               {/* activity log */}
@@ -570,7 +606,7 @@ export default function AppDashboard() {
       </div>
 
       {pendingOnboard && (
-        <div style={{ position: 'fixed', right: 22, bottom: 22, zIndex: 1000, width: 360, maxWidth: 'calc(100vw - 44px)',
+        <div style={{ position: 'fixed', left: 22, bottom: 22, zIndex: 1000, width: 360, maxWidth: 'calc(100vw - 44px)',
           ...card, padding: '1rem 1.1rem', boxShadow: 'var(--sh-lg)', animation: 'uvfade .2s ease both' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
             <ShieldCheck size={16} color="var(--primary)" />
@@ -587,13 +623,25 @@ export default function AppDashboard() {
           </div>
         </div>
       )}
+
+      <AssistantWidget view={view} context={[
+        `view=${view}`,
+        cohort ? `cohort: ${cohort.length} patients, ${flagged.length} reclassified, ${escalations.length} escalation(s), max ${maxSilent} years silent` : 'cohort: loading',
+        warehouse?.variant_count ? `warehouse: ${warehouse.variant_count} variants under surveillance` : '',
+        feeds ? `Fivetran feeds: ${feeds.map((f) => `${f.schema}=${f.paused ? 'paused' : f.is_stale ? 'stale' : 'fresh'}`).join(', ')}` : '',
+        sel ? `selected case: ${sel.patient_name}, ${sel.gene} ${sel.hgvs_c}${sel.hgvs_p ? ` (${sel.hgvs_p})` : ''}, posterior ${sel.posterior.toFixed(2)} (${sel.band}), ${sel.review_stars}-star, registry "${sel.recorded_class}" vs ClinVar "${sel.current_class}", direction ${sel.direction}, ${sel.reclassified ? 'reclassified' : 'stable'}${sel.source === 'live' ? ', served live from the commons' : ''}` : 'no case selected',
+        struc && sel ? `structure on screen: ${sel.gene} AlphaFold ${struc.uniprot ?? ''}${struc.am_available !== false && typeof struc.variant_mean_am === 'number' ? `, residue AlphaMissense ${struc.variant_mean_am.toFixed(2)}, enrichment ${struc.enrichment}x` : ''}` : '',
+        onboardStatus?.genes?.length ? `onboarding candidates: ${onboardStatus.genes.map((g) => `${g.gene}${g.onboarded ? '(in warehouse)' : `(${g.count} live lookups)`}`).join(', ')}` : '',
+      ].filter(Boolean).join('\n')} />
+
+      <Tour steps={tourSteps} open={tourOpen} onClose={() => setTourOpen(false)} />
     </main>
   );
 }
 
 function TabBar({ view, setView }: { view: View; setView: (v: View) => void }) {
   return (
-    <div style={{ ...card, padding: '.35rem', marginTop: '1.1rem', display: 'flex', gap: '.2rem', flexWrap: 'wrap', position: 'sticky', top: 8, zIndex: 20 }}>
+    <div data-tour="tabs" style={{ ...card, padding: '.35rem', marginTop: '1.1rem', display: 'flex', gap: '.2rem', flexWrap: 'wrap', position: 'sticky', top: 8, zIndex: 20 }}>
       {NAV.map((n) => {
         const on = view === n.id;
         const Icon = n.icon;
@@ -659,7 +707,7 @@ function ExplorerView({ feeds, events, resyncing, pausing, onResync, onPause, on
         </div>
       )}
 
-      <div style={card}>
+      <div data-tour="connectors" style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '.4rem' }}>
           <div style={eyebrow}>Evidence connectors · BigQuery destination</div>
           {feeds && <div style={mono({ fontSize: '.66rem', color: 'var(--faint)' })}>health check · {fresh}/{feeds.length} connectors healthy</div>}
@@ -695,7 +743,7 @@ function ExplorerView({ feeds, events, resyncing, pausing, onResync, onPause, on
         </div>
       </div>
 
-      <div style={card}>
+      <div data-tour="onboarding" style={card}>
         <div style={eyebrow}>Gene onboarding · demand-driven</div>
         <div style={{ fontSize: '.76rem', color: 'var(--muted)', marginTop: '.3rem' }}>
           Genes resolved live often enough are promoted into the warehouse: the agent stages the evidence and creates a real Fivetran connector via the MCP, then syncs it into BigQuery.
