@@ -4,6 +4,10 @@ metadata/
 # Devpost submission drafts (private working copies, not for public repo)
 devpost/
 
+# Demo production: Remotion animations project, iMovie library, recorded video,
+# example animations from other projects (large + private, not for public repo)
+demo/
+
 # Reference papers (copyrighted whitepapers + generated md/json), kept local
 refs/
 
@@ -63,3 +67,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 *.log
+
+# Private project-definition doc and local utility scripts (not for public repo)
+UNRAVEL.md
+/scripts/
